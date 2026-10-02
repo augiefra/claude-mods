@@ -22,6 +22,10 @@ const FORECAST = [
   { upTo: Infinity, icon: "↯", word: "Compacter bientôt", color: "red" },
 ];
 
+// Courbe des tours sur l'app : mêmes teintes que la météo, en couleurs lisibles sur fond clair ou sombre.
+const SPARK = { width: 60, height: 14 };
+const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#3b7dd8", magenta: "#b04fc0", red: "#e5534b" };
+
 // Relevés du contexte : { tokens, window, percent }, du plus ancien au plus récent.
 let readings = [];
 
@@ -191,10 +195,11 @@ function bound(percent) {
 // ---------- Limites : jauges ----------
 
 function gaugeBlock({ Box, Text, Svg }, mode, g) {
-  const parts = [Text({ key: "l", dimColor: true, children: g.label })];
+  // La couleur est portée par la barre ; le texte reste dans la couleur du thème, lisible partout.
+  const parts = [Text({ key: "l", children: g.label })];
   if (mode === "svg" && Svg) parts.push(Svg({ key: "g", source: svgGauge(g), alt: `${g.label} : ${g.value} consommés`, width: GAUGE.width, height: GAUGE.height }));
   if (mode === "text") parts.push(textGauge(Box, Text, g));
-  parts.push(Text({ key: "v", color: TONES[g.tone].text, children: g.value }));
+  parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
   if (g.detail) parts.push(Text({ key: "d", dimColor: true, children: g.detail }));
   return Box({ key: "gauge-" + g.label, flexDirection: "row", columnGap: 1, alignItems: "center", children: parts });
 }
@@ -230,7 +235,7 @@ function svgGauge(g) {
 // ---------- Ligne ----------
 
 function drawLine(elements, surface, columns, now) {
-  const { Box, Text } = elements;
+  const { Box, Text, Svg } = elements;
   const blocks = [];
   if (readings.length > 0) {
     const cur = readings[readings.length - 1];
@@ -244,10 +249,17 @@ function drawLine(elements, surface, columns, now) {
         children: [Text({ children: `${cur.percent} % contexte` }), Text({ dimColor: true, children: `· ${short(cur.tokens)}/${short(cur.window)}` })],
       }),
     );
-    const turns = [Text({ dimColor: true, children: "tours" }), Text({ color: f.color, children: chart() })];
-    const trend = trendWord();
-    if (trend) turns.push(Text({ dimColor: true, children: trend }));
-    blocks.push(Box({ key: "turns", flexDirection: "row", columnGap: 1, children: turns }));
+    // Un seul relevé ne dessine pas de tendance : le bloc attend le deuxième tour.
+    if (readings.length >= 2) {
+      const curve =
+        surface === "desktop" && Svg
+          ? Svg({ key: "spark", source: sparkSvg(SPARK_COLORS[f.color] ?? SPARK_COLORS.blue), alt: `Contexte sur les ${readings.length} derniers tours`, width: SPARK.width, height: SPARK.height })
+          : Text({ key: "spark", color: f.color, children: chart() });
+      const turns = [Text({ key: "t", dimColor: true, children: "tours" }), curve];
+      const trend = trendWord();
+      if (trend) turns.push(Text({ key: "d", dimColor: true, children: trend }));
+      blocks.push(Box({ key: "turns", flexDirection: "row", columnGap: 1, alignItems: "center", children: turns }));
+    }
   }
   // Une fenêtre déjà remise à zéro n'a plus de mesure valable : masquée jusqu'à la suivante.
   const gauges = limits.list.filter((limit) => !(Date.parse(limit.resetsAt ?? "") <= now)).map((limit) => gaugeOf(limit, now));
@@ -270,10 +282,10 @@ function textWidth(gauges) {
     const cur = readings[readings.length - 1];
     width += 2 + forecastFor(cur.percent).word.length;
     width += `${cur.percent} % contexte · ${short(cur.tokens)}/${short(cur.window)}`.length;
-    width += 6 + readings.length + 1 + trendWord().length;
+    if (readings.length >= 2) width += 6 + readings.length + 1 + trendWord().length;
   }
   for (const g of gauges) width += g.label.length + 1 + TEXT_CELLS + 1 + g.value.length + (g.detail ? 1 + g.detail.length : 0);
-  const blocks = (readings.length > 0 ? 3 : 0) + gauges.length;
+  const blocks = (readings.length > 0 ? (readings.length >= 2 ? 3 : 2) : 0) + gauges.length;
   return width + 3 * Math.max(0, blocks - 1) + 2;
 }
 
@@ -303,9 +315,23 @@ function forecastFor(percent) {
 }
 
 // Les barres sont relatives au tour le plus chargé affiché : la croissance se voit à tout niveau.
+// Barres sur l'échelle de la fenêtre (0 à 100 %) : la pente se lit, un tour coûteux fait une marche.
 function chart() {
-  const top = Math.max(...readings.map((r) => r.tokens), 1);
-  return readings.map((r) => BARS[Math.min(BARS.length - 1, Math.floor((r.tokens / top) * (BARS.length - 1)))]).join("");
+  return readings.map((r) => BARS[Math.min(BARS.length - 1, Math.max(0, Math.round((r.percent / 100) * (BARS.length - 1))))]).join("");
+}
+
+// Courbe pleine du remplissage du contexte, de 0 (bas) à 100 % (haut), sur les derniers tours.
+function sparkSvg(color) {
+  const { width, height } = SPARK;
+  const step = readings.length > 1 ? width / (readings.length - 1) : width;
+  const points = readings.map((r, i) => `${(i * step).toFixed(1)},${(height - (Math.min(100, Math.max(0, r.percent)) / 100) * (height - 1) - 0.5).toFixed(1)}`);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+    `<rect width="${width}" height="${height}" rx="2" fill="${TRACK}"/>` +
+    `<polygon points="0,${height} ${points.join(" ")} ${width},${height}" fill="${color}" fill-opacity="0.35"/>` +
+    `<polyline points="${points.join(" ")}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>` +
+    `</svg>`
+  );
 }
 
 function trendWord() {

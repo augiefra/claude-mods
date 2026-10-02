@@ -34,6 +34,11 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(texts).toContain("· 3j00h");
     // 5 h avant 7 j, quel que soit l'ordre reçu.
     expect(texts.indexOf("5h")).toBeLessThan(texts.indexOf("7j"));
+    // Un seul relevé : pas encore de graphique des tours.
+    expect(texts).not.toContain("tours");
+    // Hors alerte, le pourcentage garde la couleur du thème.
+    const value = await ui.find({ type: "Text", text: "59 %" });
+    console.log("59 % →", JSON.stringify(value));
   });
 }
 
@@ -54,3 +59,33 @@ test("fenêtre déjà remise à zéro : masquée", async ($, on) => {
   expect(texts).not.toContain("5h");
   expect(texts).toContain("7j");
 });
+
+for (const surface of ["terminal", "desktop"] as const) {
+  test(`tours après deux relevés ${surface}`, async ($, on) => {
+    mock.clock(on, { now: NOW });
+    mock.store(on);
+    on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+    on("ui.invalidate", () => ({ value: undefined }));
+    on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+    on("turn.complete", () => ({ text: "" }));
+    const fills = [13, 44];
+    let call = 0;
+    on("session.usage", () => {
+      const percent = fills[Math.min(call++, fills.length - 1)];
+      return { value: { startedAt: NOW, context: { tokens: percent * 10_000, window: 1_000_000, percent }, rateLimits: LIMITS } };
+    });
+    await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+    await ($ as any).turn.complete({ answer: "ok" } as any);
+    const ui = await $.ui.mount({ plugin: "token-weather-usage", surface, component: "AbovePrompt", props: { bodyColumns: 200 } as any });
+    const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
+    console.log(surface, JSON.stringify(texts));
+    expect(texts).toContain("tours");
+    expect(texts).toContain("Nuageux");
+    if (surface === "terminal") expect(texts).toContain("▂▄");
+    else {
+      const svgs = await ui.findAll({ type: "Svg" });
+      console.log("svg alts", JSON.stringify(svgs.map((s: any) => s.props?.alt)));
+      expect(svgs.length).toBe(3);
+    }
+  });
+}
