@@ -39,6 +39,12 @@ claude plugin validate ./plugins/token-weather-usage
 claude plugin test ./plugins/token-weather-usage
 ```
 
+## Confidentialité
+
+token-weather-usage ne collecte, n'envoie ni ne conserve aucune donnée personnelle. Il lit seulement les chiffres d'usage que Claude Code lui fournit (remplissage du contexte, limites 5 h et 7 jours) et garde la dernière mesure des limites dans le stockage local du plugin, sur la machine. Aucune requête réseau.
+
+*Privacy: the mod collects, sends and retains no personal data. It only reads the usage figures Claude Code provides and keeps the latest limits reading in the plugin's local storage. No network requests.*
+
 ## Crédits
 
 - La météo du contexte, les tokens et le graphique des tours viennent de l'exemple **Token Weather** d'Anthropic ([claude-code-playground](https://github.com/anthropics/claude-code-playground), Apache-2.0).

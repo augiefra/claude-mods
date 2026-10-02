@@ -1,8 +1,20 @@
 {
   "name": "token-weather-usage",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Une ligne au-dessus du prompt : météo du contexte, tokens, derniers tours, puis limites 5 h et 7 jours avec le temps écoulé et l'heure de remise à zéro (heure de Paris). D'après Token Weather (Anthropic, Apache-2.0) et l'idée d'usage-meter (HolyGrail).",
-  "author": { "name": "Eric Cologni" },
+  "author": {
+    "name": "Eric Cologni"
+  },
   "license": "Apache-2.0",
-  "repository": "https://github.com/augiefra/claude-mods"
+  "repository": "https://github.com/augiefra/claude-mods",
+  "displayName": "Token Weather Usage",
+  "homepage": "https://github.com/augiefra/claude-mods",
+  "keywords": [
+    "mod",
+    "statusline",
+    "usage",
+    "rate-limits",
+    "context",
+    "token-weather"
+  ]
 }
