@@ -1,10 +1,10 @@
 // Token Weather Usage : une ligne au-dessus du prompt, blocs séparés par un trait fin.
-//   ☂ Averses │ 67 % contexte · 134k/1M │ tours ▁▂█ ▲ +98.3k │ 5h ━━━━━┃── 62 % · 2h13 → 17:13 │ 7j ┃─── 5 % · 4j18h
+//   ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▂▂▃▃▄▄ ▲ +698 │ 5h ━━━┃──── 37 % · 2h22 → 18:20 │ 7j ━━━━┃─── 60 % · 2j23h
 //
 // Météo, contexte et derniers tours : adapté de l'exemple Token Weather,
 //   Copyright 2026 Anthropic PBC, SPDX-License-Identifier: Apache-2.0 (claude-code-playground).
-// Limites 5 h et 7 jours : écrites pour ce mod, sur l'idée d'usage-meter de HolyGrail
-//   (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter), sans reprise de son code.
+// Limites 5 h et 7 jours : écrites pour ce mod d'après usage-meter de HolyGrail
+//   (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter), sans copie de son code.
 //
 // Le moteur lit on(...) et $.noun.method(...) dans le source : ils restent écrits en toutes
 // lettres, et les fonctions qui reçoivent $ sont au premier niveau.
@@ -24,7 +24,7 @@ const FORECAST = [
 
 // Courbe des tours sur l'app : mêmes teintes que la météo, en couleurs lisibles sur fond clair ou sombre.
 const SPARK = { width: 60, height: 14 };
-const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#3b7dd8", magenta: "#b04fc0", red: "#e5534b" };
+const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#3b7dd8", magenta: "#b04fc0", red: "#d64545" };
 
 // Relevés du contexte : { tokens, window, percent }, du plus ancien au plus récent.
 let readings = [];
@@ -56,12 +56,12 @@ const SEP = "│";
 const TEXT_CELLS = 8;
 const GAUGE = { width: 72, height: 9 };
 const TONES = {
-  calm: { svg: "#4caf50", text: "green" },
-  fast: { svg: "#e0a526", text: "yellow" },
-  alert: { svg: "#e5534b", text: "red" },
+  calm: { svg: "#3fa66b", text: "green" },
+  fast: { svg: "#d9962b", text: "yellow" },
+  alert: { svg: "#d64545", text: "red" },
 };
-const TRACK = "rgba(128,128,128,0.3)";
-const NOW_MARK = { svg: "#5b9bff", text: "cyan" };
+const TRACK = "rgba(127,127,127,0.28)";
+const NOW_MARK = { svg: "#4f8ef7", text: "cyan" };
 // Colonnes que le terminal peut recouvrir en fin de bande.
 const RESERVED_COLUMNS = 2;
 
@@ -72,8 +72,10 @@ export function register(on) {
     limits = { at: 0, list: [] };
     const usage = await $.session.usage();
     pushReading(usage.context);
-    if (usage.rateLimits.length > 0) await shareLimits($, usage.rateLimits);
+    // Au démarrage ou au rechargement, la mesure locale peut dater (fil resté inactif) : la mesure
+    // partagée prime, et la locale n'est publiée que si aucune n'existe encore.
     await adoptShared($);
+    if (limits.list.length === 0 && usage.rateLimits.length > 0) await shareLimits($, usage.rateLimits);
     // Toutes les minutes : le temps écoulé avance, et une autre session a pu mesurer plus récent.
     ticker = $.clock.every(MINUTE, async () => {
       await adoptShared($);
@@ -84,7 +86,8 @@ export function register(on) {
   });
 
   on("session.end", async ($, e, next) => {
-    if (["prompt_input_exit", "other"].includes(e.reason)) ticker?.cancel();
+    // Fin réelle (sortie, ou processus arrêté) ; /clear, /resume et la déconnexion gardent la minuterie.
+    if (e.reason === "prompt_input_exit" || e.reason === "other") ticker?.cancel();
     return next(e);
   });
 
@@ -113,10 +116,9 @@ export function register(on) {
     const elements = $.ui.resolve(e);
     const now = await $.clock.now();
     const line = drawLine(elements, e.surface, props.bodyColumns ?? 80, now);
-    // Garder ce que les mods suivants dessinent, seulement s'il y a vraiment quelque chose.
-    const rest = await next(e);
-    if (isBlank(rest)) return line;
-    return elements.Box({ flexDirection: "column", children: [line, rest] });
+    // Les mods placés après dessinent sous notre ligne ; un dessin vide n'ajoute pas de ligne blanche.
+    const below = await next(e);
+    return isBlank(below) ? line : elements.Box({ flexDirection: "column", children: [line, below] });
   });
 }
 
@@ -179,13 +181,21 @@ function duration(ms) {
 // Heure de Paris (CET/CEST) sans dépendre du fuseau de la machine.
 function parisTime(ms) {
   const year = new Date(ms).getUTCFullYear();
-  const lastSunday = (month) => {
-    const end = new Date(Date.UTC(year, month + 1, 0, 1));
-    return end.getTime() - end.getUTCDay() * DAY;
-  };
-  const offset = ms >= lastSunday(2) && ms < lastSunday(9) ? 2 : 1;
+  // Heure d'été du dernier dimanche de mars au dernier dimanche d'octobre, à 01:00 UTC.
+  const summer = ms >= lastSundayAt1Utc(year, 3) && ms < lastSundayAt1Utc(year, 10);
+  const offset = summer ? 2 : 1;
   const local = new Date(ms + offset * HOUR);
   return `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+// Dernier dimanche du mois (1 à 12), 01:00 UTC, en ms.
+function lastSundayAt1Utc(year, month) {
+  for (let day = 31; day >= 25; day--) {
+    const t = Date.UTC(year, month - 1, day, 1);
+    const d = new Date(t);
+    if (d.getUTCMonth() === month - 1 && d.getUTCDay() === 0) return t;
+  }
+  return Date.UTC(year, month - 1, 25, 1);
 }
 
 function bound(percent) {
@@ -200,22 +210,22 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
   if (mode === "svg" && Svg) parts.push(Svg({ key: "g", source: svgGauge(g), alt: `${g.label} : ${g.value} consommés`, width: GAUGE.width, height: GAUGE.height }));
   if (mode === "text") parts.push(textGauge(Box, Text, g));
   parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
-  if (g.detail) parts.push(Text({ key: "d", dimColor: true, children: g.detail }));
+  // Terminal trop étroit : le détail tombe avec la barre, il reste le libellé et le pourcentage.
+  if (g.detail && mode !== "none") parts.push(Text({ key: "d", dimColor: true, children: g.detail }));
   return Box({ key: "gauge-" + g.label, flexDirection: "row", columnGap: 1, alignItems: "center", children: parts });
 }
 
 // Barre de caractères : plein jusqu'à la part consommée, repère ┃ au temps écoulé.
 function textGauge(Box, Text, g) {
   const filled = Math.round((g.used / 100) * TEXT_CELLS);
-  const mark = g.elapsed === null ? -1 : Math.min(TEXT_CELLS - 1, Math.floor((g.elapsed / 100) * TEXT_CELLS));
-  const cells = [];
-  for (let i = 0; i < TEXT_CELLS; i++) {
-    if (i === mark) cells.push(Text({ key: "c" + i, color: NOW_MARK.text, children: "┃" }));
-    else if (i < filled) cells.push(Text({ key: "c" + i, color: TONES[g.tone].text, children: "━" }));
-    else cells.push(Text({ key: "c" + i, dimColor: true, children: "─" }));
-  }
+  const markAt = g.elapsed === null ? null : Math.min(TEXT_CELLS - 1, Math.floor((g.elapsed / 100) * TEXT_CELLS));
+  const cell = (i) => {
+    const key = "c" + i;
+    if (markAt === i) return Text({ key, color: NOW_MARK.text, children: "┃" });
+    return i < filled ? Text({ key, color: TONES[g.tone].text, children: "━" }) : Text({ key, dimColor: true, children: "─" });
+  };
   // Cellules collées, sans l'espace du bloc entre elles.
-  return Box({ key: "bar", flexDirection: "row", children: cells });
+  return Box({ key: "bar", flexDirection: "row", children: Array.from({ length: TEXT_CELLS }, (_, i) => cell(i)) });
 }
 
 function svgGauge(g) {
@@ -263,8 +273,9 @@ function drawLine(elements, surface, columns, now) {
   }
   // Une fenêtre déjà remise à zéro n'a plus de mesure valable : masquée jusqu'à la suivante.
   const gauges = limits.list.filter((limit) => !(Date.parse(limit.resetsAt ?? "") <= now)).map((limit) => gaugeOf(limit, now));
-  // Jauges dessinées sur l'app, en caractères au terminal, absentes si la ligne déborde.
-  const mode = surface === "desktop" ? "svg" : textWidth(gauges) <= columns - RESERVED_COLUMNS ? "text" : "none";
+  // Barres dessinées sur l'app ; au terminal, en caractères si la ligne tient, sinon sans barre ni détail.
+  let mode = "svg";
+  if (surface !== "desktop") mode = textWidth(gauges) <= columns - RESERVED_COLUMNS ? "text" : "none";
   for (const g of gauges) blocks.push(gaugeBlock(elements, mode, g));
 
   const children = [];
@@ -314,7 +325,6 @@ function forecastFor(percent) {
   return FORECAST.find((band) => percent < band.upTo) ?? FORECAST[FORECAST.length - 1];
 }
 
-// Les barres sont relatives au tour le plus chargé affiché : la croissance se voit à tout niveau.
 // Barres sur l'échelle de la fenêtre (0 à 100 %) : la pente se lit, un tour coûteux fait une marche.
 function chart() {
   return readings.map((r) => BARS[Math.min(BARS.length - 1, Math.max(0, Math.round((r.percent / 100) * (BARS.length - 1))))]).join("");

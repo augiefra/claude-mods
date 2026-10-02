@@ -7,6 +7,7 @@ https://github.com/anthropics/claude-code-playground
 Copyright 2026 Anthropic PBC, licensed under the Apache License, Version 2.0.
 Changes: French labels, one-line layout, merged with the usage gauges below.
 
-The 5-hour and 7-day usage gauges were written for this mod, inspired by
-usage-meter by HolyGrail (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter).
-No code from usage-meter is included.
+The 5-hour and 7-day usage gauges were written for this mod after
+usage-meter by HolyGrail (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter):
+same idea (gauges with an elapsed-time marker, a reading shared across
+sessions), without copying its code.

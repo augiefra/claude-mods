@@ -24,7 +24,6 @@ for (const surface of ["terminal", "desktop"] as const) {
     await $.session.start({ source: "startup", cwd: "/tmp" } as any);
     const ui = await $.ui.mount({ plugin: "token-weather-usage", surface, component: "AbovePrompt", props: { bodyColumns: 200 } as any });
     const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
-    console.log(surface, JSON.stringify(texts));
     expect(texts).toContain("Clair");
     expect(texts).toContain("11 % contexte");
     expect(texts).toContain("5h");
@@ -37,8 +36,9 @@ for (const surface of ["terminal", "desktop"] as const) {
     // Un seul relevé : pas encore de graphique des tours.
     expect(texts).not.toContain("tours");
     // Hors alerte, le pourcentage garde la couleur du thème.
-    const value = await ui.find({ type: "Text", text: "59 %" });
-    console.log("59 % →", JSON.stringify(value));
+    const value: any = await ui.find({ type: "Text", text: "59 %" });
+    expect(value?.props?.color).toBeUndefined();
+    expect(value?.props?.bold).toBe(true);
   });
 }
 
@@ -78,14 +78,55 @@ for (const surface of ["terminal", "desktop"] as const) {
     await ($ as any).turn.complete({ answer: "ok" } as any);
     const ui = await $.ui.mount({ plugin: "token-weather-usage", surface, component: "AbovePrompt", props: { bodyColumns: 200 } as any });
     const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
-    console.log(surface, JSON.stringify(texts));
     expect(texts).toContain("tours");
     expect(texts).toContain("Nuageux");
     if (surface === "terminal") expect(texts).toContain("▂▄");
     else {
       const svgs = await ui.findAll({ type: "Svg" });
-      console.log("svg alts", JSON.stringify(svgs.map((s: any) => s.props?.alt)));
       expect(svgs.length).toBe(3);
     }
   });
 }
+
+test("au démarrage, la mesure partagée prime sur une mesure locale ancienne", async ($, on) => {
+  mock.clock(on, { now: NOW });
+  // Un autre fil a mesuré 63 % il y a 2 minutes.
+  mock.store(on, {
+    limits: { at: NOW - 120_000, list: [{ kind: "five_hour", percentUsed: 63, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString() }] },
+  });
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  // Ce fil, resté inactif, garde une vieille mesure à 34 %.
+  const old = [{ kind: "five_hour", percentUsed: 34, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString() }];
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: old } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const ui = await $.ui.mount({ plugin: "token-weather-usage", surface: "terminal", component: "AbovePrompt", props: { bodyColumns: 200 } as any });
+  const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
+  expect(texts).toContain("63 %");
+  expect(texts).not.toContain("34 %");
+});
+
+test("alerte : pourcentage en rouge à 90 % ou plus", async ($, on) => {
+  mock.clock(on, { now: NOW });
+  mock.store(on);
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  const hot = [{ kind: "five_hour", percentUsed: 95, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString() }];
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: hot } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const ui = await $.ui.mount({ plugin: "token-weather-usage", surface: "desktop", component: "AbovePrompt", props: { bodyColumns: 200 } as any });
+  const value: any = await ui.find({ type: "Text", text: "95 %" });
+  expect(value?.props?.color).toBe("red");
+});
+
+test("terminal étroit : ni barre ni détail", async ($, on) => {
+  world(on);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const ui = await $.ui.mount({ plugin: "token-weather-usage", surface: "terminal", component: "AbovePrompt", props: { bodyColumns: 60 } as any });
+  const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
+  expect(texts).toContain("32 %");
+  expect(texts).not.toContain("━");
+  expect(texts).not.toContain("· 3h00 → 18:00");
+});
