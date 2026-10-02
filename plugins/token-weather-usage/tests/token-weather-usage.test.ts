@@ -36,3 +36,21 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(texts.indexOf("5h")).toBeLessThan(texts.indexOf("7j"));
   });
 }
+
+test("fenêtre déjà remise à zéro : masquée", async ($, on) => {
+  mock.clock(on, { now: NOW });
+  mock.store(on);
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  const stale = [
+    { kind: "five_hour", percentUsed: 80, resetsAt: new Date(NOW - 60_000).toISOString() },
+    { kind: "seven_day", percentUsed: 59, resetsAt: new Date(NOW + 3 * 86_400_000).toISOString() },
+  ];
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: stale } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const ui = await $.ui.mount({ plugin: "token-weather-usage", surface: "terminal", component: "AbovePrompt", props: { bodyColumns: 200 } as any });
+  const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
+  expect(texts).not.toContain("5h");
+  expect(texts).toContain("7j");
+});

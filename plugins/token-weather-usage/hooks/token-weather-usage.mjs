@@ -249,7 +249,8 @@ function drawLine(elements, surface, columns, now) {
     if (trend) turns.push(Text({ dimColor: true, children: trend }));
     blocks.push(Box({ key: "turns", flexDirection: "row", columnGap: 1, children: turns }));
   }
-  const gauges = limits.list.map((limit) => gaugeOf(limit, now));
+  // Une fenêtre déjà remise à zéro n'a plus de mesure valable : masquée jusqu'à la suivante.
+  const gauges = limits.list.filter((limit) => !(Date.parse(limit.resetsAt ?? "") <= now)).map((limit) => gaugeOf(limit, now));
   // Jauges dessinées sur l'app, en caractères au terminal, absentes si la ligne déborde.
   const mode = surface === "desktop" ? "svg" : textWidth(gauges) <= columns - RESERVED_COLUMNS ? "text" : "none";
   for (const g of gauges) blocks.push(gaugeBlock(elements, mode, g));
