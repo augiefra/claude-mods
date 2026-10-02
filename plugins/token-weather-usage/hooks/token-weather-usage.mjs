@@ -1,5 +1,5 @@
 // Token Weather Usage : une ligne au-dessus du prompt, blocs séparés par un trait fin.
-//   ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━┃──── 37 % · 2h22 → 18:20 │ 7j ━━━━┃─── 60 % · 2j23h
+//   ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━╍╍╍── 37 % · 2h22 → 18:20 │ 7j ━━━━╍─── 60 % · 2j23h
 //
 // Météo, contexte et derniers tours : adapté de l'exemple Token Weather,
 //   Copyright 2026 Anthropic PBC, SPDX-License-Identifier: Apache-2.0 (claude-code-playground).
@@ -89,8 +89,9 @@ const TONES = {
   fast: { svg: "#d9962b", text: "yellow" },
   alert: { svg: "#d64545", text: "red" },
 };
-const TRACK = "rgba(127,127,127,0.28)";
-const NOW_MARK = { svg: "#4f8ef7", text: "cyan" };
+const TRACK = "rgba(127,127,127,0.2)";
+// Hachures de l'écart quand on va moins vite que le temps : rayures grises sur le fond de la jauge.
+const HATCH = { back: "rgba(127,127,127,0.16)", line: "rgba(127,127,127,0.6)" };
 // Colonnes que le terminal peut recouvrir en fin de bande.
 const RESERVED_COLUMNS = 2;
 
@@ -273,31 +274,45 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
   return Box({ key: "gauge-" + g.label, flexDirection: "row", columnGap: 1, alignItems: "center", children: parts });
 }
 
-// Barre de caractères : plein jusqu'à la part consommée, repère ┃ au temps écoulé.
+// Barre de caractères : trait plein jusqu'à la part consommée ; l'écart avec le temps écoulé en
+// pointillé épais ╍, dans la couleur de la barre si on va plus vite que le temps, en gris sinon.
 function textGauge(Box, Text, g) {
-  const filled = Math.round((g.used / 100) * TEXT_CELLS);
-  const markAt = g.elapsed === null ? null : Math.min(TEXT_CELLS - 1, Math.floor((g.elapsed / 100) * TEXT_CELLS));
+  const used = Math.round((g.used / 100) * TEXT_CELLS);
+  const time = g.elapsed === null ? used : Math.round((g.elapsed / 100) * TEXT_CELLS);
+  const color = TONES[g.tone].text;
   const cell = (i) => {
     const key = "c" + i;
-    if (markAt === i) return Text({ key, color: NOW_MARK.text, children: "┃" });
-    return i < filled ? Text({ key, color: TONES[g.tone].text, children: "━" }) : Text({ key, dimColor: true, children: "─" });
+    if (i < Math.min(used, time)) return Text({ key, color, children: "━" });
+    if (i < used) return Text({ key, color, children: "╍" });
+    if (i < time) return Text({ key, dimColor: true, children: "╍" });
+    return Text({ key, dimColor: true, children: "─" });
   };
   // Cellules collées, sans l'espace du bloc entre elles.
   return Box({ key: "bar", flexDirection: "row", children: Array.from({ length: TEXT_CELLS }, (_, i) => cell(i)) });
 }
 
+// Jauge dessinée : barre pleine jusqu'à la part consommée ; l'écart avec le temps écoulé est hachuré,
+// en gris après la barre (marge restante) ou dans la couleur de la barre (avance sur le temps).
 function svgGauge(g) {
   const { width, height } = GAUGE;
   const radius = height / 2;
-  const fill = (bound(g.used) / 100) * width;
-  const mark = g.elapsed === null ? "" : `<rect x="${Math.min(width - 2, (g.elapsed / 100) * width).toFixed(1)}" y="0" width="2" height="${height}" fill="${NOW_MARK.svg}"/>`;
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
-    `<rect width="${width}" height="${height}" rx="${radius}" fill="${TRACK}"/>` +
-    `<rect width="${fill.toFixed(1)}" height="${height}" rx="${radius}" fill="${TONES[g.tone].svg}"/>` +
-    mark +
-    `</svg>`
-  );
+  const used = (bound(g.used) / 100) * width;
+  const time = g.elapsed === null ? used : (g.elapsed / 100) * width;
+  const color = TONES[g.tone].svg;
+  const id = "tw" + String(g.label).replace(/[^a-z0-9]/gi, "");
+  const stripes = (name, back, backOpacity, line) =>
+    `<pattern id="${name}" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">` +
+    `<rect width="4" height="4" fill="${back}" fill-opacity="${backOpacity}"/><rect width="1.6" height="4" fill="${line}"/></pattern>`;
+  const defs =
+    `<defs>${stripes(id + "m", HATCH.back, 1, HATCH.line)}${stripes(id + "a", color, 0.35, color)}` +
+    `<clipPath id="${id}t"><rect width="${width}" height="${height}" rx="${radius}"/></clipPath>` +
+    `<clipPath id="${id}b"><rect width="${used.toFixed(1)}" height="${height}" rx="${radius}"/></clipPath></defs>`;
+  let body = `<rect width="${width}" height="${height}" fill="${TRACK}"/>`;
+  if (time > used) body += `<rect width="${time.toFixed(1)}" height="${height}" fill="url(#${id}m)"/>`;
+  body += `<g clip-path="url(#${id}b)"><rect width="${Math.min(used, time).toFixed(1)}" height="${height}" fill="${color}"/>`;
+  if (used > time) body += `<rect x="${time.toFixed(1)}" width="${(used - time).toFixed(1)}" height="${height}" fill="url(#${id}a)"/>`;
+  body += `</g>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${defs}<g clip-path="url(#${id}t)">${body}</g></svg>`;
 }
 
 // ---------- Ligne ----------

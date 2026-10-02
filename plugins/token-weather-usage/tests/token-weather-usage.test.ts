@@ -172,3 +172,35 @@ test("après un redémarrage, les barres des tours reviennent", async ($, on) =>
   expect(store.has("turns:vieux-fil")).toBe(false);
   expect(store.has("turns:fil-1")).toBe(true);
 });
+
+for (const surface of ["terminal", "desktop"] as const) {
+  test(`écart avec le temps hachuré ${surface}`, async ($, on) => {
+    mock.clock(on, { now: NOW });
+    mock.store(on);
+    on("session.id", () => ({ value: "fil-1" }));
+    on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+    on("ui.invalidate", () => ({ value: undefined }));
+    on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+    const gaps = [
+      // 5 h : 74 % consommés, fenêtre finie à 99 % : marge restante.
+      { kind: "five_hour", percentUsed: 74, resetsAt: new Date(NOW + 3 * 60_000).toISOString() },
+      // 7 j : 80 % consommés pour 57 % écoulés : avance sur le temps (alerte).
+      { kind: "seven_day", percentUsed: 80, resetsAt: new Date(NOW + 3 * 86_400_000).toISOString() },
+    ];
+    on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: gaps } }));
+    await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+    const ui = await $.ui.mount({ plugin: "token-weather-usage", surface, component: "AbovePrompt", props: { bodyColumns: 200 } as any });
+    if (surface === "terminal") {
+      const dashes = (await ui.findAll({ type: "Text", text: "╍" })) as any[];
+      // 2 cases de marge grise (5 h), 1 case d'avance rouge (7 j).
+      expect(dashes.filter((d) => d.props?.dimColor).length).toBe(2);
+      expect(dashes.filter((d) => d.props?.color === "red").length).toBe(1);
+    } else {
+      const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+      const gauges = svgs.filter((s) => String(s.props?.alt ?? "").includes("consommés"));
+      expect(gauges.length).toBe(2);
+      for (const g of gauges) expect(String(g.props?.source)).toContain("<pattern");
+      expect(svgs.some((s) => String(s.props?.source).includes("#4f8ef7"))).toBe(false);
+    }
+  });
+}
