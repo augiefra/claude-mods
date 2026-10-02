@@ -1,0 +1,12 @@
+{
+  "name": "augiefra-mods",
+  "owner": { "name": "Eric Cologni" },
+  "metadata": { "description": "Mods Claude Code d'Eric Cologni." },
+  "plugins": [
+    {
+      "name": "token-weather-usage",
+      "source": "./plugins/token-weather-usage",
+      "description": "Météo du contexte et limites 5 h / 7 jours, sur une ligne au-dessus du prompt."
+    }
+  ]
+}
