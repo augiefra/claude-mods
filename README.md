@@ -1,35 +1,39 @@
 # claude-mods
 
-Mods pour [Claude Code](https://claude.dev/blog/getting-started-with-claude-code-mods/), par Eric Cologni.
+[Claude Code](https://claude.dev/blog/getting-started-with-claude-code-mods/) mods by Eric Cologni.
 
 ## token-weather-usage
 
-Une ligne au-dessus du prompt, dans l'app de bureau :
+Stop hitting your Claude limit by surprise. One line above the prompt shows your 5-hour and weekly limits against the clock, how full your context is, and what each prompt cost.
 
-![La bande dans l'app de bureau](docs/bande.png)
+In the desktop app:
 
-Et dans le terminal :
+![The band in the desktop app](docs/band.png)
+
+In the terminal:
 
 ```
-☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━╍╍╍── 37 % · 2h22 → 18:20 │ 7j ━━━━╍─── 60 % · 2j23h
+☂ Showers │ 63% context · 634k/1M │ turns ▃▆▂█▃▄▂▆ ▲ +6.3k │ 5h ━━━━━━╍─ 74% · 24 min → 18:20 │ 7d ━━━━━─── 65% · 2d20h
 ```
 
-- **Météo du contexte** : de Clair à « Compacter bientôt », selon la part de la fenêtre de contexte utilisée. Icônes dessinées dans l'app (soleil, nuage, averse, éclair, zigzag), symboles Unicode dans le terminal.
-- **Contexte** : pourcentage et tokens utilisés sur la fenêtre.
-- **Tours** : une barre par prompt sur les 8 derniers, de hauteur égale aux tokens ajoutés (le prompt le plus lourd remplit la hauteur) ; le prompt actuel en couleur, les précédents en gris. Puis l'écart du dernier prompt. Affiché à partir du deuxième prompt, et conservé après un redémarrage.
-- **5h / 7j** : part consommée des limites du compte. L'écart avec le temps écoulé de la fenêtre est hachuré : en gris après la barre quand il reste de la marge, dans la couleur de la barre quand on consomme plus vite que le temps.
-  Vert tant que la consommation ne va pas plus vite que le temps ; jaune au-delà ; rouge à plus de 15 points d'avance ou à partir de 90 %.
-  Le pourcentage reste dans la couleur du texte, en rouge seulement en alerte. Puis le temps restant, et pour la limite 5 h l'heure de remise à zéro (heure de Paris).
-  Une fenêtre déjà remise à zéro est masquée jusqu'à la mesure suivante.
-  La dernière mesure est partagée entre les sessions ouvertes sur la machine.
+- **5h / 7d**: the share of your account's limits already used. The gap with the time elapsed in the window is hatched: grey after the bar while you have margin, in the bar's color when you use faster than time passes.
+  Green while usage does not run ahead of time; yellow beyond; red when more than 15 points ahead or past 90%.
+  The percentage stays in the text color, red only on alert. Then the time left and, for the 5-hour limit, the reset time (machine's time zone).
+  A window that already reset is hidden until the next reading. The latest reading is shared across the sessions open on the machine.
 
-  ![Les hachures de l'écart avec le temps](docs/jauges-hachures.png)
+  ![Hatching of the gap with elapsed time](docs/gauges-hatching.png)
 
-Jauges et barres sont dessinées en SVG dans l'app de bureau et en caractères dans le terminal. Si la ligne ne tient pas dans le terminal, les barres et le détail s'effacent ; il reste le libellé et le pourcentage.
+- **Context weather**: from Clear to "Compact soon", by the share of the context window in use. Icons drawn in the app (sun, cloud, showers, lightning, zigzag), Unicode symbols in the terminal.
+- **Context**: percentage and tokens used out of the window.
+- **Turns**: one bar per prompt for the last 8, as tall as the tokens it added (the heaviest prompt fills the height); the current prompt in color, earlier ones in grey. Then the last prompt's change. Shown from the second prompt on, and kept across restarts.
 
-*English: a one-line band above the prompt with context "weather", context tokens, per-prompt token bars, and your 5-hour and 7-day usage limits, where the gap with elapsed time is hatched. Labels are in French.*
+Gauges and bars are drawn as SVG in the desktop app and as characters in the terminal. When the line does not fit the terminal, the bars and details drop out, leaving labels and percentages.
 
-### Installer
+### Language
+
+Labels are in English or French. By default (`auto`) the mod follows `LC_ALL`, `LC_MESSAGES` or `LANG` and falls back to English. The desktop app often sets none of them: pick `en` or `fr` in the plugin's **Language** option in `/config`.
+
+### Install
 
 ```
 /plugin marketplace add augiefra/claude-mods
@@ -37,26 +41,24 @@ Jauges et barres sont dessinées en SVG dans l'app de bureau et en caractères d
 /reload-plugins
 ```
 
-Si la ligne n'apparaît pas, redémarrer Claude Code. Un mod est du code qui tourne dans Claude Code avec les mêmes accès que lui : relisez-le avant de l'installer.
+If the line does not show up, restart Claude Code. A mod is code that runs inside Claude Code with the same access as Claude Code: read it before installing. This one is a single file, [token-weather-usage.mjs](plugins/token-weather-usage/hooks/token-weather-usage.mjs).
 
-### Vérifier
+### Check
 
 ```
 claude plugin validate ./plugins/token-weather-usage
 claude plugin test ./plugins/token-weather-usage
 ```
 
-## Confidentialité
+## Privacy
 
-token-weather-usage ne collecte, n'envoie ni ne conserve aucune donnée personnelle. Il lit seulement les chiffres d'usage que Claude Code lui fournit (remplissage du contexte, limites 5 h et 7 jours) et garde dans le stockage local du plugin, sur la machine, la dernière mesure des limites et, par fil, les derniers relevés de contexte (effacés après 8 jours d'inactivité). Aucune requête réseau.
+token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits) and the locale variables above, and keeps in the plugin's local storage, on the machine, the latest limits reading and, per session, recent context readings (deleted after 8 idle days). No network requests.
 
-*Privacy: the mod collects, sends and retains no personal data. It only reads the usage figures Claude Code provides and keeps the latest limits reading and, per session, recent context readings (deleted after 8 idle days) in the plugin's local storage. No network requests.*
+## Credits
 
-## Crédits
+- The context weather, the tokens and the turns chart come from Anthropic's **Token Weather** example ([claude-code-playground](https://github.com/anthropics/claude-code-playground), Apache-2.0).
+- The limit gauges are inspired by HolyGrail's **usage-meter** ([HolyGrail/claude-mods](https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter)). They were written for this mod after usage-meter (same idea: gauges with an elapsed-time marker, a reading shared across sessions), without copying its code.
 
-- La météo du contexte, les tokens et le graphique des tours viennent de l'exemple **Token Weather** d'Anthropic ([claude-code-playground](https://github.com/anthropics/claude-code-playground), Apache-2.0).
-- Les jauges de limites s'inspirent de **usage-meter** de HolyGrail ([HolyGrail/claude-mods](https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter)). Elles ont été écrites pour ce mod d'après usage-meter (même idée : jauges avec repère du temps écoulé, mesure partagée entre sessions), sans copie de son code.
+## License
 
-## Licence
-
-Apache-2.0, voir [LICENSE](LICENSE) et [NOTICE](NOTICE).
+Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -5,7 +5,7 @@ token-weather-usage includes code adapted from the Token Weather example mod
 (context weather, context tokens, recent turns chart) in
 https://github.com/anthropics/claude-code-playground
 Copyright 2026 Anthropic PBC, licensed under the Apache License, Version 2.0.
-Changes: French labels, one-line layout, merged with the usage gauges below.
+Changes: English and French labels, one-line layout, merged with the usage gauges below.
 
 The 5-hour and 7-day usage gauges were written for this mod after
 usage-meter by HolyGrail (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter):

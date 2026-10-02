@@ -1,7 +1,7 @@
 {
   "name": "token-weather-usage",
-  "version": "3.7.1",
-  "description": "Une ligne au-dessus du prompt : météo du contexte, tokens, derniers tours, puis limites 5 h et 7 jours avec le temps écoulé et l'heure de remise à zéro (heure de Paris). D'après Token Weather (Anthropic, Apache-2.0) et l'idée d'usage-meter (HolyGrail).",
+  "version": "3.8.0",
+  "description": "One line above the prompt: context weather, tokens, a bar per recent prompt, then your 5-hour and 7-day limits against the time elapsed, with the reset time. Labels in English or French. After Token Weather (Anthropic, Apache-2.0) and the idea of usage-meter (HolyGrail).",
   "author": {
     "name": "Eric Cologni"
   },
@@ -16,5 +16,15 @@
     "rate-limits",
     "context",
     "token-weather"
-  ]
+  ],
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Labels in English (en) or French (fr). auto follows LC_ALL, LC_MESSAGES or LANG, and falls back to English.",
+      "required": false,
+      "default": "auto",
+      "options": ["auto", "en", "fr"]
+    }
+  }
 }

@@ -1,85 +1,113 @@
-// Token Weather Usage : une ligne au-dessus du prompt, blocs séparés par un trait fin.
-//   ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━╍╍╍── 37 % · 2h22 → 18:20 │ 7j ━━━━╍─── 60 % · 2j23h
+// Token Weather Usage: one line above the prompt, blocks split by a thin rule.
+//   ☁ Cloudy │ 44% context · 440k/1M │ turns ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━╍╍╍── 37% · 2h22 → 18:20 │ 7d ━━━━╍─── 60% · 2d23h
 //
-// Météo, contexte et derniers tours : adapté de l'exemple Token Weather,
+// Weather, context and recent turns: adapted from the Token Weather example,
 //   Copyright 2026 Anthropic PBC, SPDX-License-Identifier: Apache-2.0 (claude-code-playground).
-// Limites 5 h et 7 jours : écrites pour ce mod d'après usage-meter de HolyGrail
-//   (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter), sans copie de son code.
+// 5-hour and 7-day limits: written for this mod after HolyGrail's usage-meter
+//   (https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter), without copying its code.
 //
-// Le moteur lit on(...) et $.noun.method(...) dans le source : ils restent écrits en toutes
-// lettres, et les fonctions qui reçoivent $ sont au premier niveau.
+// The engine reads on(...) and $.noun.method(...) from the source: they stay spelled out,
+// and the functions that take $ live at the top level.
 
-// ---------- Météo du contexte (Token Weather) ----------
+// ---------- Language ----------
+
+// Labels in English or French. "auto" follows LC_ALL, LC_MESSAGES or LANG, then the runtime's
+// locale; English unless one of them starts with "fr". The desktop app often sets none of
+// them, so the language option (/config) is the sure way to pick.
+const TEXT = {
+  en: {
+    weather: { clear: "Clear", cloudy: "Cloudy", showers: "Showers", storm: "Storm", compact: "Compact soon" },
+    percent: (n) => `${n}%`,
+    context: "context",
+    turns: "turns",
+    labels: { five_hour: "5h", seven_day: "7d", spend_limit: "$" },
+    day: "d",
+    turnsAlt: (n) => `Tokens added by the last ${n} prompts`,
+    gaugeAlt: (label, value) => `${label}: ${value} used`,
+  },
+  fr: {
+    weather: { clear: "Clair", cloudy: "Nuageux", showers: "Averses", storm: "Orage", compact: "Compacter bientôt" },
+    percent: (n) => `${n} %`,
+    context: "contexte",
+    turns: "tours",
+    labels: { five_hour: "5h", seven_day: "7j", spend_limit: "$" },
+    day: "j",
+    turnsAlt: (n) => `Tokens ajoutés par les ${n} derniers prompts`,
+    gaugeAlt: (label, value) => `${label} : ${value} consommés`,
+  },
+};
+let T = TEXT.en;
+
+// ---------- Context weather (Token Weather) ----------
 
 const HISTORY = 12;
 const BARS = "▁▂▃▄▅▆▇█";
 const FORECAST = [
-  // Symboles d'une seule colonne, pas d'emoji : ils s'alignent dans toutes les polices.
-  { upTo: 25, icon: "☀", word: "Clair", color: "yellow" },
-  { upTo: 50, icon: "☁", word: "Nuageux", color: "cyan" },
-  { upTo: 75, icon: "☂", word: "Averses", color: "blue" },
-  { upTo: 90, icon: "☇", word: "Orage", color: "magenta" },
-  { upTo: Infinity, icon: "↯", word: "Compacter bientôt", color: "red" },
+  // Single-column symbols, no emoji: they line up in every font.
+  { upTo: 25, id: "clear", icon: "☀", color: "yellow" },
+  { upTo: 50, id: "cloudy", icon: "☁", color: "cyan" },
+  { upTo: 75, id: "showers", icon: "☂", color: "blue" },
+  { upTo: 90, id: "storm", icon: "☇", color: "magenta" },
+  { upTo: Infinity, id: "compact", icon: "↯", color: "red" },
 ];
 
-// Barres des tours : tokens ajoutés par chacun des derniers prompts ; le prompt actuel prend la teinte
-// de la météo (couleurs lisibles sur fond clair ou sombre), les précédents restent gris.
+// Turn bars: tokens added by each recent prompt; the current prompt takes the weather's tint
+// (colors readable on light and dark backgrounds), earlier ones stay grey.
 const TURN_BARS = 8;
 const SPARK = { height: 14, bar: 5.5, gap: 2 };
 const PAST_BAR = "rgba(127,127,127,0.45)";
 const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#2f68c0", magenta: "#b04fc0", red: "#d64545" };
 
-// Icônes météo dessinées pour l'app (le terminal garde les symboles Unicode de FORECAST) : pleines,
-// 15 px, chacune dans sa teinte. « Compacter bientôt » reprend le zigzag ↯, en trait épais.
+// Weather icons drawn in the app (the terminal keeps FORECAST's Unicode symbols): filled,
+// 15 px, each in its own tint. "Compact soon" redraws the ↯ zigzag with a thick stroke.
 const WEATHER_ICON_SIZE = 15;
 const WEATHER_ICONS = {
-  Clair: (c) =>
+  clear: (c) =>
     `<circle cx="12" cy="12" r="4.5" fill="${c}"/><path fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`,
-  Nuageux: (c) =>
+  cloudy: (c) =>
     `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M7 18.5a3.75 3.75 0 0 1-.4-7.48A5.6 5.6 0 0 1 17.2 9.6a4.45 4.45 0 0 1 .3 8.9z"/>`,
-  Averses: (c) =>
+  showers: (c) =>
     `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M7 14.5a3.25 3.25 0 0 1-.35-6.48A5 5 0 0 1 16.2 6.8a3.85 3.85 0 0 1 .3 7.7z"/><path fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" d="M8.5 17.5l-1 2.5M12.5 17.5l-1 2.5M16.5 17.5l-1 2.5"/>`,
-  Orage: (c) => `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M13.5 2 5 13.5h6.5L10.5 22 19 10.5h-6.5z"/>`,
-  "Compacter bientôt": (c) =>
+  storm: (c) => `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M13.5 2 5 13.5h6.5L10.5 22 19 10.5h-6.5z"/>`,
+  compact: (c) =>
     `<path fill="none" stroke="${c}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" d="M14 2 7 12h8l-5 9M14.5 18.8 10 21l-.5-5"/>`,
 };
-const WEATHER_ICON_COLORS = { Clair: "#e0b000", Nuageux: "#8ea3b8", Averses: "#2f68c0", Orage: "#b04fc0", "Compacter bientôt": "#d64545" };
+const WEATHER_ICON_COLORS = { clear: "#e0b000", cloudy: "#8ea3b8", showers: "#2f68c0", storm: "#b04fc0", compact: "#d64545" };
 
-function weatherSvg(word) {
-  const draw = WEATHER_ICONS[word];
+function weatherSvg(id) {
+  const draw = WEATHER_ICONS[id];
   if (!draw) return null;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24">${draw(WEATHER_ICON_COLORS[word])}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24">${draw(WEATHER_ICON_COLORS[id])}</svg>`;
 }
 
-// Relevés du contexte : { tokens, window, percent }, du plus ancien au plus récent.
+// Context readings: { tokens, window, percent }, oldest first.
 let readings = [];
-// Les relevés de chaque fil sont gardés dans $.store, pour retrouver les barres après un redémarrage.
+// Each session's readings are kept in $.store, so the bars come back after a restart.
 const TURNS_PREFIX = "turns:";
 const TURNS_KEEP_MS = 8 * 24 * 3_600_000;
 let turnsKey = null;
 
-// ---------- Limites du compte ----------
+// ---------- Account limits ----------
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
-// Durée de chaque fenêtre ; sans durée (plafond de dépenses), pas de repère de temps écoulé.
+// Length of each window; without one (spend cap), no elapsed-time marker.
 const SPANS = { five_hour: 5 * HOUR, seven_day: 7 * DAY };
-const LABELS = { five_hour: "5h", seven_day: "7j", spend_limit: "$" };
-// Ordre d'affichage ; une fenêtre inconnue passe après.
+// Display order; an unknown window goes last.
 const ORDER = ["five_hour", "seven_day", "spend_limit"];
-// Rythme = part consommée moins part du temps écoulée, en points.
-// Au-dessus de 0 : on consomme plus vite que le temps ; au-delà de 15, ou à 90 % consommés : alerte.
+// Pace = share used minus share of time elapsed, in points.
+// Above 0: using faster than time; beyond 15, or at 90% used: alert.
 const PACE_ALERT = 15;
 const USED_ALERT = 90;
-// Les limites sont celles du compte : la dernière mesure, toutes sessions confondues, vit dans $.store.
+// Limits belong to the account: the latest reading, across sessions, lives in $.store.
 const SHARED_KEY = "limits";
 
-// Dernière mesure connue : { at (ms), list: SessionRateLimit[] }.
+// Latest known reading: { at (ms), list: SessionRateLimit[] }.
 let limits = { at: 0, list: [] };
 let ticker = null;
 
-// ---------- Mise en page ----------
+// ---------- Layout ----------
 
 const SEP = "│";
 const TEXT_CELLS = 8;
@@ -90,25 +118,28 @@ const TONES = {
   alert: { svg: "#d64545", text: "red" },
 };
 const TRACK = "rgba(127,127,127,0.2)";
-// Hachures de l'écart quand on va moins vite que le temps : rayures grises sur le fond de la jauge.
+// Hatching of the gap when using slower than time: grey stripes on the gauge's track.
 const HATCH = { back: "rgba(127,127,127,0.16)", line: "rgba(127,127,127,0.6)" };
-// Colonnes que le terminal peut recouvrir en fin de bande.
+// Columns the terminal may cover at the end of the band.
 const RESERVED_COLUMNS = 2;
 
-export function register(on) {
+export function register(on, options) {
+  const language = options?.language;
+
   on("session.start", async ($, e, next) => {
     ticker?.cancel();
+    T = TEXT[await languageOf($, language)];
     readings = [];
     limits = { at: 0, list: [] };
     turnsKey = TURNS_PREFIX + (await $.session.id());
     await restoreTurns($);
     const usage = await $.session.usage();
     pushReading(usage.context);
-    // Au démarrage ou au rechargement, la mesure locale peut dater (fil resté inactif) : la mesure
-    // partagée prime, et la locale n'est publiée que si aucune n'existe encore.
+    // On start or reload the local reading may be stale (an idle session): the shared reading
+    // wins, and the local one is published only when none exists yet.
     await adoptShared($);
     if (limits.list.length === 0 && usage.rateLimits.length > 0) await shareLimits($, usage.rateLimits);
-    // Toutes les minutes : le temps écoulé avance, et une autre session a pu mesurer plus récent.
+    // Every minute: elapsed time moves on, and another session may have measured something newer.
     ticker = $.clock.every(MINUTE, async () => {
       await adoptShared($);
       $.ui.invalidate("ui.render");
@@ -118,12 +149,12 @@ export function register(on) {
   });
 
   on("session.end", async ($, e, next) => {
-    // Fin réelle (sortie, ou processus arrêté) ; /clear, /resume et la déconnexion gardent la minuterie.
+    // A real end (exit, or process stopped); /clear, /resume and disconnect keep the ticker.
     if (e.reason === "prompt_input_exit" || e.reason === "other") ticker?.cancel();
     return next(e);
   });
 
-  // Un relevé de contexte après chaque tour principal (pas ceux des sous-agents).
+  // One context reading after each main turn (not subagents' turns).
   on("turn.complete", async ($, e, next) => {
     const result = await next(e);
     if (e.agentId) return result;
@@ -132,7 +163,7 @@ export function register(on) {
       await saveTurns($);
       $.ui.invalidate("ui.render");
     } catch {
-      // Pas de relevé ce tour-ci : la ligne garde le précédent.
+      // No reading this turn: the line keeps the previous one.
     }
     return result;
   });
@@ -149,15 +180,34 @@ export function register(on) {
     const elements = $.ui.resolve(e);
     const now = await $.clock.now();
     const line = drawLine(elements, e.surface, props.bodyColumns ?? 80, now);
-    // Les mods placés après dessinent sous notre ligne ; un dessin vide n'ajoute pas de ligne blanche.
+    // Mods placed after us draw below our line; an empty drawing adds no blank line.
     const below = await next(e);
     return isBlank(below) ? line : elements.Box({ flexDirection: "column", children: [line, below] });
   });
 }
 
-// ---------- Tours : relevés gardés par fil ----------
+// "en" or "fr": the language option when it names one, otherwise the environment's locale.
+async function languageOf($, choice) {
+  if (choice === "en" || choice === "fr") return choice;
+  let locale = "";
+  try {
+    locale = (await $.env.get("LC_ALL")) || (await $.env.get("LC_MESSAGES")) || (await $.env.get("LANG")) || "";
+  } catch {
+    locale = "";
+  }
+  if (!locale || locale === "C" || locale === "POSIX") {
+    try {
+      locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    } catch {
+      locale = "";
+    }
+  }
+  return /^fr/i.test(locale) ? "fr" : "en";
+}
 
-// Reprend les relevés de ce fil, et efface ceux des fils inactifs depuis plus de 8 jours.
+// ---------- Turns: readings kept per session ----------
+
+// Restores this session's readings, and deletes those of sessions idle for more than 8 days.
 async function restoreTurns($) {
   const now = await $.clock.now();
   try {
@@ -168,7 +218,7 @@ async function restoreTurns($) {
       else if (!saved || !(now - saved.at < TURNS_KEEP_MS)) await $.store.delete(key);
     }
   } catch {
-    // Stockage illisible : la ligne repart de zéro.
+    // Unreadable store: the line starts from scratch.
   }
 }
 
@@ -177,13 +227,13 @@ async function saveTurns($) {
   try {
     await $.store.set(turnsKey, { at: await $.clock.now(), readings });
   } catch {
-    // Pas de sauvegarde ce tour-ci : les barres reviendront au tour suivant.
+    // Not saved this turn: the bars come back on the next one.
   }
 }
 
-// ---------- Limites : mesure partagée ----------
+// ---------- Limits: shared reading ----------
 
-// Garde la mesure de cette session et la publie si elle est la plus récente connue.
+// Keeps this session's reading and publishes it if it is the most recent known.
 async function shareLimits($, list) {
   const at = await $.clock.now();
   limits = { at, list: sortLimits(list) };
@@ -196,13 +246,13 @@ async function shareLimits($, list) {
   if (!stored || !(stored.at > at)) await $.store.set(SHARED_KEY, limits);
 }
 
-// Reprend la mesure d'une autre session quand elle est plus récente que la nôtre.
+// Takes another session's reading when it is newer than ours.
 async function adoptShared($) {
   try {
     const stored = await $.store.get(SHARED_KEY);
     if (stored && Array.isArray(stored.list) && stored.at > limits.at) limits = { at: stored.at, list: sortLimits(stored.list) };
   } catch {
-    // Stockage illisible : on garde la mesure locale.
+    // Unreadable store: keep the local reading.
   }
 }
 
@@ -211,9 +261,9 @@ function sortLimits(list) {
   return [...list].sort((a, b) => rank(a.kind) - rank(b.kind));
 }
 
-// ---------- Limites : lecture d'une fenêtre ----------
+// ---------- Limits: reading one window ----------
 
-// Ce que la ligne affiche d'une fenêtre : part consommée, temps écoulé, ton, détail en gris.
+// What the line shows of a window: share used, time elapsed, tone, grey detail.
 function gaugeOf(limit, now) {
   const used = Math.max(0, limit.percentUsed);
   const resetMs = limit.resetsAt ? Date.parse(limit.resetsAt) : NaN;
@@ -223,59 +273,49 @@ function gaugeOf(limit, now) {
   const pace = elapsed === null ? 0 : used - elapsed;
   const tone = used >= USED_ALERT || pace > PACE_ALERT ? "alert" : pace > 0 ? "fast" : "calm";
   let detail = "";
-  if (left !== null) detail = limit.kind === "five_hour" ? `· ${duration(left)} → ${parisTime(resetMs)}` : `· ${duration(left)}`;
-  return { label: LABELS[limit.kind] ?? limit.kind, used, elapsed, tone, value: `${Math.round(used)} %`, detail };
+  if (left !== null) detail = limit.kind === "five_hour" ? `· ${duration(left)} → ${clockTime(resetMs)}` : `· ${duration(left)}`;
+  return { label: T.labels[limit.kind] ?? limit.kind, used, elapsed, tone, value: T.percent(Math.round(used)), detail };
 }
 
-// 3h02, 42 min, 2j23h.
+// 3h02, 42 min, 2d23h (2j23h in French).
 function duration(ms) {
   const minutes = Math.round(ms / MINUTE);
   if (minutes < 60) return `${minutes} min`;
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
-  if (days > 0) return `${days}j${String(hours).padStart(2, "0")}h`;
+  if (days > 0) return `${days}${T.day}${String(hours).padStart(2, "0")}h`;
   return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
 }
 
-// Heure de Paris (CET/CEST) sans dépendre du fuseau de la machine.
-function parisTime(ms) {
-  const year = new Date(ms).getUTCFullYear();
-  // Heure d'été du dernier dimanche de mars au dernier dimanche d'octobre, à 01:00 UTC.
-  const summer = ms >= lastSundayAt1Utc(year, 3) && ms < lastSundayAt1Utc(year, 10);
-  const offset = summer ? 2 : 1;
-  const local = new Date(ms + offset * HOUR);
-  return `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}`;
-}
-
-// Dernier dimanche du mois (1 à 12), 01:00 UTC, en ms.
-function lastSundayAt1Utc(year, month) {
-  for (let day = 31; day >= 25; day--) {
-    const t = Date.UTC(year, month - 1, day, 1);
-    const d = new Date(t);
-    if (d.getUTCMonth() === month - 1 && d.getUTCDay() === 0) return t;
+// 24-hour time in the machine's time zone; UTC when the runtime has no time zone data.
+function clockTime(ms) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ms);
+  } catch {
+    const d = new Date(ms);
+    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
   }
-  return Date.UTC(year, month - 1, 25, 1);
 }
 
 function bound(percent) {
   return Math.min(100, Math.max(0, percent));
 }
 
-// ---------- Limites : jauges ----------
+// ---------- Limits: gauges ----------
 
 function gaugeBlock({ Box, Text, Svg }, mode, g) {
-  // La couleur est portée par la barre ; le texte reste dans la couleur du thème, lisible partout.
+  // The bar carries the color; the text stays in the theme's color, readable everywhere.
   const parts = [Text({ key: "l", children: g.label })];
-  if (mode === "svg" && Svg) parts.push(Svg({ key: "g", source: svgGauge(g), alt: `${g.label} : ${g.value} consommés`, width: GAUGE.width, height: GAUGE.height }));
+  if (mode === "svg" && Svg) parts.push(Svg({ key: "g", source: svgGauge(g), alt: T.gaugeAlt(g.label, g.value), width: GAUGE.width, height: GAUGE.height }));
   if (mode === "text") parts.push(textGauge(Box, Text, g));
   parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
-  // Terminal trop étroit : le détail tombe avec la barre, il reste le libellé et le pourcentage.
+  // Terminal too narrow: the detail goes with the bar, leaving the label and the percentage.
   if (g.detail && mode !== "none") parts.push(Text({ key: "d", dimColor: true, children: g.detail }));
   return Box({ key: "gauge-" + g.label, flexDirection: "row", columnGap: 1, alignItems: "center", children: parts });
 }
 
-// Barre de caractères : trait plein jusqu'à la part consommée ; l'écart avec le temps écoulé en
-// pointillé épais ╍, dans la couleur de la barre si on va plus vite que le temps, en gris sinon.
+// Character bar: solid up to the share used; the gap with elapsed time in heavy dashes ╍,
+// in the bar's color when using faster than time, grey otherwise.
 function textGauge(Box, Text, g) {
   const used = Math.round((g.used / 100) * TEXT_CELLS);
   const time = g.elapsed === null ? used : Math.round((g.elapsed / 100) * TEXT_CELLS);
@@ -287,12 +327,12 @@ function textGauge(Box, Text, g) {
     if (i < time) return Text({ key, dimColor: true, children: "╍" });
     return Text({ key, dimColor: true, children: "─" });
   };
-  // Cellules collées, sans l'espace du bloc entre elles.
+  // Cells side by side, without the block's spacing between them.
   return Box({ key: "bar", flexDirection: "row", children: Array.from({ length: TEXT_CELLS }, (_, i) => cell(i)) });
 }
 
-// Jauge dessinée : barre pleine jusqu'à la part consommée ; l'écart avec le temps écoulé est hachuré,
-// en gris après la barre (marge restante) ou dans la couleur de la barre (avance sur le temps).
+// Drawn gauge: solid bar up to the share used; the gap with elapsed time is hatched,
+// grey after the bar (margin left) or in the bar's color (ahead of time).
 function svgGauge(g) {
   const { width, height } = GAUGE;
   const radius = height / 2;
@@ -315,7 +355,7 @@ function svgGauge(g) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${defs}<g clip-path="url(#${id}t)">${body}</g></svg>`;
 }
 
-// ---------- Ligne ----------
+// ---------- Line ----------
 
 function drawLine(elements, surface, columns, now) {
   const { Box, Text, Svg } = elements;
@@ -323,34 +363,35 @@ function drawLine(elements, surface, columns, now) {
   if (readings.length > 0) {
     const cur = readings[readings.length - 1];
     const f = forecastFor(cur.percent);
-    const iconSvg = surface === "desktop" && Svg ? weatherSvg(f.word) : null;
+    const word = T.weather[f.id];
+    const iconSvg = surface === "desktop" && Svg ? weatherSvg(f.id) : null;
     const icon = iconSvg
-      ? Svg({ key: "icon", source: iconSvg, alt: f.word, width: WEATHER_ICON_SIZE, height: WEATHER_ICON_SIZE })
+      ? Svg({ key: "icon", source: iconSvg, alt: word, width: WEATHER_ICON_SIZE, height: WEATHER_ICON_SIZE })
       : Text({ key: "icon", color: f.color, bold: true, children: f.icon });
-    blocks.push(Box({ key: "weather", flexDirection: "row", columnGap: 1, alignItems: "center", children: [icon, Text({ key: "word", children: f.word })] }));
+    blocks.push(Box({ key: "weather", flexDirection: "row", columnGap: 1, alignItems: "center", children: [icon, Text({ key: "word", children: word })] }));
     blocks.push(
       Box({
         key: "context",
         flexDirection: "row",
         columnGap: 1,
-        children: [Text({ children: `${cur.percent} % contexte` }), Text({ dimColor: true, children: `· ${short(cur.tokens)}/${short(cur.window)}` })],
+        children: [Text({ children: contextText(cur) }), Text({ dimColor: true, children: tokensText(cur) })],
       }),
     );
-    // Un seul relevé ne dessine pas de tendance : le bloc attend le deuxième tour.
+    // A single reading draws no trend: the block waits for the second turn.
     if (readings.length >= 2) {
       const curve =
         surface === "desktop" && Svg
-          ? Svg({ key: "spark", source: barsSvg(SPARK_COLORS[f.color] ?? SPARK_COLORS.blue), alt: `Tokens ajoutés par les ${turnDeltas().length} derniers prompts`, width: barsWidth(turnDeltas().length), height: SPARK.height })
+          ? Svg({ key: "spark", source: barsSvg(SPARK_COLORS[f.color] ?? SPARK_COLORS.blue), alt: T.turnsAlt(turnDeltas().length), width: barsWidth(turnDeltas().length), height: SPARK.height })
           : Box({ key: "spark", flexDirection: "row", children: chartText(Text, f.color) });
-      const turns = [Text({ key: "t", dimColor: true, children: "tours" }), curve];
+      const turns = [Text({ key: "t", dimColor: true, children: T.turns }), curve];
       const trend = trendWord();
       if (trend) turns.push(Text({ key: "d", dimColor: true, children: trend }));
       blocks.push(Box({ key: "turns", flexDirection: "row", columnGap: 1, alignItems: "center", children: turns }));
     }
   }
-  // Une fenêtre déjà remise à zéro n'a plus de mesure valable : masquée jusqu'à la suivante.
+  // A window that already reset has no valid reading: hidden until the next one.
   const gauges = limits.list.filter((limit) => !(Date.parse(limit.resetsAt ?? "") <= now)).map((limit) => gaugeOf(limit, now));
-  // Barres dessinées sur l'app ; au terminal, en caractères si la ligne tient, sinon sans barre ni détail.
+  // Drawn bars in the app; in the terminal, characters when the line fits, otherwise no bar or detail.
   let mode = "svg";
   if (surface !== "desktop") mode = textWidth(gauges) <= columns - RESERVED_COLUMNS ? "text" : "none";
   for (const g of gauges) blocks.push(gaugeBlock(elements, mode, g));
@@ -363,21 +404,30 @@ function drawLine(elements, surface, columns, now) {
   return Box({ flexDirection: "row", alignItems: "center", paddingX: 1, children });
 }
 
-// Largeur de la ligne en caractères avec les barres, pour le terminal.
+// "44% context", and "· 440k/1M" in grey.
+function contextText(cur) {
+  return `${T.percent(cur.percent)} ${T.context}`;
+}
+
+function tokensText(cur) {
+  return `· ${short(cur.tokens)}/${short(cur.window)}`;
+}
+
+// Width of the line in characters with the bars, for the terminal.
 function textWidth(gauges) {
   let width = 0;
   if (readings.length > 0) {
     const cur = readings[readings.length - 1];
-    width += 2 + forecastFor(cur.percent).word.length;
-    width += `${cur.percent} % contexte · ${short(cur.tokens)}/${short(cur.window)}`.length;
-    if (readings.length >= 2) width += 6 + turnDeltas().length + 1 + trendWord().length;
+    width += 2 + T.weather[forecastFor(cur.percent).id].length;
+    width += `${contextText(cur)} ${tokensText(cur)}`.length;
+    if (readings.length >= 2) width += T.turns.length + 1 + turnDeltas().length + 1 + trendWord().length;
   }
   for (const g of gauges) width += g.label.length + 1 + TEXT_CELLS + 1 + g.value.length + (g.detail ? 1 + g.detail.length : 0);
   const blocks = (readings.length > 0 ? (readings.length >= 2 ? 3 : 2) : 0) + gauges.length;
   return width + 3 * Math.max(0, blocks - 1) + 2;
 }
 
-// Vrai pour un arbre sans rien à afficher : rien, texte vide, ou boîtes et textes vides imbriqués.
+// True for a tree with nothing to show: nothing, empty text, or nested empty boxes and texts.
 function isBlank(node) {
   if (node == null || node === false || node === "") return true;
   if (Array.isArray(node)) return node.every(isBlank);
@@ -386,15 +436,15 @@ function isBlank(node) {
   return false;
 }
 
-// ---------- Météo : relevés et rendu (Token Weather) ----------
+// ---------- Weather: readings and drawing (Token Weather) ----------
 
 function pushReading(context) {
   if (!context || !context.window) return;
   const tokens = context.tokens ?? 0;
   const percent = Math.round(context.percent ?? (tokens / context.window) * 100);
-  // Le relevé de démarrage vaut 0 avant la première réponse : l'écarter dès qu'un vrai arrive.
+  // The start reading is 0 before the first answer: drop it as soon as a real one arrives.
   readings = readings.filter((r) => r.tokens > 0);
-  // Une réouverture relit le même contexte : pas de relevé en double, donc pas de fausse barre vide.
+  // A reopened session reads the same context again: no duplicate reading, so no false empty bar.
   const last = readings[readings.length - 1];
   if (last && last.tokens === tokens && tokens > 0) return;
   readings.push({ tokens, window: context.window, percent });
@@ -405,22 +455,22 @@ function forecastFor(percent) {
   return FORECAST.find((band) => percent < band.upTo) ?? FORECAST[FORECAST.length - 1];
 }
 
-// Tokens ajoutés par chacun des derniers prompts (au plus TURN_BARS), du plus ancien au plus récent.
-// Une compaction fait baisser le contexte : ce prompt compte pour 0.
+// Tokens added by each recent prompt (at most TURN_BARS), oldest first.
+// A compaction lowers the context: that prompt counts as 0.
 function turnDeltas() {
   const deltas = [];
   for (let i = 1; i < readings.length; i++) deltas.push(Math.max(0, readings[i].tokens - readings[i - 1].tokens));
   return deltas.slice(-TURN_BARS);
 }
 
-// Hauteur relative au prompt le plus lourd affiché : le prompt qui a coûté le plus remplit la hauteur.
+// Height relative to the heaviest prompt shown: the prompt that cost the most fills the height.
 function barLevels() {
   const deltas = turnDeltas();
   const top = Math.max(...deltas, 1);
   return deltas.map((d) => d / top);
 }
 
-// Terminal : un caractère par prompt, les précédents en gris, l'actuel dans la teinte de la météo.
+// Terminal: one character per prompt, earlier ones grey, the current one in the weather's tint.
 function chartText(Text, color) {
   const glyphs = barLevels().map((level) => BARS[Math.round(level * (BARS.length - 1))]);
   const last = glyphs.pop();
@@ -430,12 +480,12 @@ function chartText(Text, color) {
   return parts;
 }
 
-// Largeur juste pour n barres : la zone grandit avec les prompts, sans vide à côté de « tours ».
+// Just wide enough for n bars: the area grows with the prompts, with no gap next to "turns".
 function barsWidth(n) {
   return Math.max(1, n) * SPARK.bar + Math.max(0, n - 1) * SPARK.gap;
 }
 
-// App : barres arrondies, la plus récente en couleur ; un prompt à 0 garde un trait au sol.
+// App: rounded bars, the most recent in color; a prompt at 0 keeps a line on the floor.
 function barsSvg(color) {
   const { height, bar, gap } = SPARK;
   const levels = barLevels();
@@ -457,7 +507,7 @@ function trendWord() {
   return "=";
 }
 
-// 1M, 1.2M, 107k, 98.3k, 950 : une décimale seulement quand elle compte.
+// 1M, 1.2M, 107k, 98.3k, 950: one decimal only when it matters.
 function short(n) {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
   if (n >= 100_000) return `${Math.round(n / 1_000)}k`;

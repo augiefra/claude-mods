@@ -1,28 +1,28 @@
 # Token Weather Usage
 
-Une ligne au-dessus du prompt de Claude Code : la météo du contexte, les tokens, une barre par prompt, puis tes limites 5 h et 7 jours.
+One line above the Claude Code prompt: your 5-hour and 7-day limits against the clock, the context weather, the tokens, and a bar per prompt.
 
-![La bande dans l'app de bureau](https://raw.githubusercontent.com/augiefra/claude-mods/main/docs/bande.png)
+![The band in the desktop app](https://raw.githubusercontent.com/augiefra/claude-mods/main/docs/band.png)
 
-- **Météo du contexte** : de Clair à « Compacter bientôt », selon la part de la fenêtre de contexte utilisée. Icônes dessinées dans l'app, symboles Unicode dans le terminal.
-- **Contexte** : pourcentage et tokens utilisés sur la fenêtre.
-- **Tours** : une barre par prompt sur les 8 derniers, de hauteur égale aux tokens ajoutés ; le prompt actuel en couleur. Conservé après un redémarrage.
-- **5h / 7j** : part consommée des limites du compte, en vert, jaune ou rouge selon le rythme. L'écart avec le temps écoulé est hachuré : en gris quand il reste de la marge, dans la couleur de la barre quand on consomme plus vite que le temps. Puis le temps restant et l'heure de remise à zéro (heure de Paris).
+- **5h / 7d**: the share of your account's limits already used, in green, yellow or red by pace. The gap with the time elapsed is hatched: grey while you have margin, in the bar's color when you use faster than time passes. Then the time left and the reset time (machine's time zone).
+- **Context weather**: from Clear to "Compact soon", by the share of the context window in use. Icons drawn in the app, Unicode symbols in the terminal.
+- **Context**: percentage and tokens used out of the window.
+- **Turns**: one bar per prompt for the last 8, as tall as the tokens it added; the current prompt in color. Kept across restarts.
 
-![Les hachures de l'écart avec le temps](https://raw.githubusercontent.com/augiefra/claude-mods/main/docs/jauges-hachures.png)
+![Hatching of the gap with elapsed time](https://raw.githubusercontent.com/augiefra/claude-mods/main/docs/gauges-hatching.png)
 
-Dans le terminal :
+In the terminal:
 
 ```
-☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━╍╍╍── 37 % · 2h22 → 18:20 │ 7j ━━━━╍─── 60 % · 2j23h
+☂ Showers │ 63% context · 634k/1M │ turns ▃▆▂█▃▄▂▆ ▲ +6.3k │ 5h ━━━━━━╍─ 74% · 24 min → 18:20 │ 7d ━━━━━─── 65% · 2d20h
 ```
 
-*English: a one-line band above the Claude Code prompt with context "weather", context tokens, per-prompt token bars, and your 5-hour and 7-day usage limits, where the gap with elapsed time is hatched. Labels are in French.*
+Labels in English or French: `auto` follows `LC_ALL`, `LC_MESSAGES` or `LANG`, otherwise pick `en` or `fr` in the **Language** option (`/config`).
 
-## Confidentialité
+## Privacy
 
-Aucune donnée personnelle collectée, envoyée ni conservée, aucune requête réseau. Le mod lit les chiffres d'usage fournis par Claude Code et garde dans le stockage local du plugin la dernière mesure des limites et, par fil, les derniers relevés de contexte (effacés après 8 jours d'inactivité).
+No personal data collected, sent or retained, no network requests. The mod reads the usage figures Claude Code provides and the locale variables, and keeps in the plugin's local storage the latest limits reading and, per session, recent context readings (deleted after 8 idle days).
 
-## Crédits et licence
+## Credits and license
 
-Météo, contexte et graphique des tours d'après l'exemple **Token Weather** d'Anthropic ([claude-code-playground](https://github.com/anthropics/claude-code-playground), Apache-2.0). Jauges de limites écrites d'après **usage-meter** de HolyGrail ([HolyGrail/claude-mods](https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter)), sans copie de son code. Licence Apache-2.0 : voir [LICENSE](https://github.com/augiefra/claude-mods/blob/main/LICENSE) et [NOTICE](https://github.com/augiefra/claude-mods/blob/main/NOTICE).
+Weather, context and turns chart after Anthropic's **Token Weather** example ([claude-code-playground](https://github.com/anthropics/claude-code-playground), Apache-2.0). Limit gauges written after HolyGrail's **usage-meter** ([HolyGrail/claude-mods](https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter)), without copying its code. Apache-2.0 license: see [LICENSE](https://github.com/augiefra/claude-mods/blob/main/LICENSE) and [NOTICE](https://github.com/augiefra/claude-mods/blob/main/NOTICE).
