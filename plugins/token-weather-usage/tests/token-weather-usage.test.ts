@@ -12,6 +12,7 @@ const LIMITS = [
 function world(on: any) {
   mock.clock(on, { now: NOW });
   mock.store(on);
+  on("session.id", () => ({ value: "fil-1" }));
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
   on("ui.invalidate", () => ({ value: undefined }));
   on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
@@ -45,6 +46,7 @@ for (const surface of ["terminal", "desktop"] as const) {
 test("fenêtre déjà remise à zéro : masquée", async ($, on) => {
   mock.clock(on, { now: NOW });
   mock.store(on);
+  on("session.id", () => ({ value: "fil-1" }));
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
   on("ui.invalidate", () => ({ value: undefined }));
   on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
@@ -64,23 +66,31 @@ for (const surface of ["terminal", "desktop"] as const) {
   test(`tours après deux relevés ${surface}`, async ($, on) => {
     mock.clock(on, { now: NOW });
     mock.store(on);
+    on("session.id", () => ({ value: "fil-1" }));
     on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
     on("ui.invalidate", () => ({ value: undefined }));
     on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
     on("turn.complete", () => ({ text: "" }));
-    const fills = [13, 44];
+    // 4 relevés : +20k, +80k, +10k tokens.
+    const fills = [10, 12, 20, 21];
     let call = 0;
     on("session.usage", () => {
       const percent = fills[Math.min(call++, fills.length - 1)];
       return { value: { startedAt: NOW, context: { tokens: percent * 10_000, window: 1_000_000, percent }, rateLimits: LIMITS } };
     });
     await $.session.start({ source: "startup", cwd: "/tmp" } as any);
-    await ($ as any).turn.complete({ answer: "ok" } as any);
+    for (let i = 0; i < 3; i++) await ($ as any).turn.complete({ answer: "ok" } as any);
     const ui = await $.ui.mount({ plugin: "token-weather-usage", surface, component: "AbovePrompt", props: { bodyColumns: 200 } as any });
     const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
     expect(texts).toContain("tours");
-    expect(texts).toContain("Nuageux");
-    if (surface === "terminal") expect(texts).toContain("▂▄");
+    expect(texts).toContain("Clair");
+    expect(texts).toContain("▲ +10k");
+    if (surface === "terminal") {
+      // Précédents en gris (+20k puis +80k, le plus lourd), prompt actuel (+10k) en couleur.
+      expect(texts).toContain("▃█");
+      const now: any = await ui.find({ type: "Text", text: "▂" });
+      expect(now?.props?.color).toBe("yellow");
+    }
     else {
       const svgs = await ui.findAll({ type: "Svg" });
       expect(svgs.length).toBe(3);
@@ -95,6 +105,7 @@ test("au démarrage, la mesure partagée prime sur une mesure locale ancienne", 
     limits: { at: NOW - 120_000, list: [{ kind: "five_hour", percentUsed: 63, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString() }] },
   });
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("session.id", () => ({ value: "fil-1" }));
   on("ui.invalidate", () => ({ value: undefined }));
   on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
   // Ce fil, resté inactif, garde une vieille mesure à 34 %.
@@ -110,6 +121,7 @@ test("au démarrage, la mesure partagée prime sur une mesure locale ancienne", 
 test("alerte : pourcentage en rouge à 90 % ou plus", async ($, on) => {
   mock.clock(on, { now: NOW });
   mock.store(on);
+  on("session.id", () => ({ value: "fil-1" }));
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
   on("ui.invalidate", () => ({ value: undefined }));
   on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
@@ -129,4 +141,31 @@ test("terminal étroit : ni barre ni détail", async ($, on) => {
   expect(texts).toContain("32 %");
   expect(texts).not.toContain("━");
   expect(texts).not.toContain("· 3h00 → 18:00");
+});
+
+test("après un redémarrage, les barres des tours reviennent", async ($, on) => {
+  mock.clock(on, { now: NOW });
+  // Stockage en mémoire : le même fil avait déjà 3 relevés (+20k, puis +80k) ; un autre fil dort depuis 9 jours.
+  const store = new Map<string, unknown>([
+    ["turns:fil-1", { at: NOW - 60_000, readings: [10, 12, 20].map((p) => ({ tokens: p * 10_000, window: 1_000_000, percent: p })) }],
+    ["turns:vieux-fil", { at: NOW - 9 * 86_400_000, readings: [] }],
+  ]);
+  on("store.get", (_$: any, e: any) => ({ value: store.get(e.key) }));
+  on("store.set", (_$: any, e: any) => (store.set(e.key, e.value), { value: undefined }));
+  on("store.delete", (_$: any, e: any) => (store.delete(e.key), { value: undefined }));
+  on("store.keys", () => ({ value: [...store.keys()] }));
+  on("session.id", () => ({ value: "fil-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  // À la réouverture, le contexte est le même que le dernier relevé : pas de relevé en double.
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 200_000, window: 1_000_000, percent: 20 }, rateLimits: LIMITS } }));
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  const ui = await $.ui.mount({ plugin: "token-weather-usage", surface: "terminal", component: "AbovePrompt", props: { bodyColumns: 200 } as any });
+  const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
+  expect(texts).toContain("tours");
+  expect(texts).toContain("▲ +80k");
+  // Le fil inactif depuis plus de 8 jours est effacé, pas celui-ci.
+  expect(store.has("turns:vieux-fil")).toBe(false);
+  expect(store.has("turns:fil-1")).toBe(true);
 });

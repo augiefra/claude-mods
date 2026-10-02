@@ -1,5 +1,5 @@
 // Token Weather Usage : une ligne au-dessus du prompt, blocs séparés par un trait fin.
-//   ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▂▂▃▃▄▄ ▲ +698 │ 5h ━━━┃──── 37 % · 2h22 → 18:20 │ 7j ━━━━┃─── 60 % · 2j23h
+//   ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━┃──── 37 % · 2h22 → 18:20 │ 7j ━━━━┃─── 60 % · 2j23h
 //
 // Météo, contexte et derniers tours : adapté de l'exemple Token Weather,
 //   Copyright 2026 Anthropic PBC, SPDX-License-Identifier: Apache-2.0 (claude-code-playground).
@@ -22,12 +22,19 @@ const FORECAST = [
   { upTo: Infinity, icon: "↯", word: "Compacter bientôt", color: "red" },
 ];
 
-// Courbe des tours sur l'app : mêmes teintes que la météo, en couleurs lisibles sur fond clair ou sombre.
-const SPARK = { width: 60, height: 14 };
+// Barres des tours : tokens ajoutés par chacun des derniers prompts ; le prompt actuel prend la teinte
+// de la météo (couleurs lisibles sur fond clair ou sombre), les précédents restent gris.
+const TURN_BARS = 8;
+const SPARK = { height: 14, bar: 5.5, gap: 2 };
+const PAST_BAR = "rgba(127,127,127,0.45)";
 const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#3b7dd8", magenta: "#b04fc0", red: "#d64545" };
 
 // Relevés du contexte : { tokens, window, percent }, du plus ancien au plus récent.
 let readings = [];
+// Les relevés de chaque fil sont gardés dans $.store, pour retrouver les barres après un redémarrage.
+const TURNS_PREFIX = "turns:";
+const TURNS_KEEP_MS = 8 * 24 * 3_600_000;
+let turnsKey = null;
 
 // ---------- Limites du compte ----------
 
@@ -70,6 +77,8 @@ export function register(on) {
     ticker?.cancel();
     readings = [];
     limits = { at: 0, list: [] };
+    turnsKey = TURNS_PREFIX + (await $.session.id());
+    await restoreTurns($);
     const usage = await $.session.usage();
     pushReading(usage.context);
     // Au démarrage ou au rechargement, la mesure locale peut dater (fil resté inactif) : la mesure
@@ -97,6 +106,7 @@ export function register(on) {
     if (e.agentId) return result;
     try {
       pushReading((await $.session.usage()).context);
+      await saveTurns($);
       $.ui.invalidate("ui.render");
     } catch {
       // Pas de relevé ce tour-ci : la ligne garde le précédent.
@@ -120,6 +130,32 @@ export function register(on) {
     const below = await next(e);
     return isBlank(below) ? line : elements.Box({ flexDirection: "column", children: [line, below] });
   });
+}
+
+// ---------- Tours : relevés gardés par fil ----------
+
+// Reprend les relevés de ce fil, et efface ceux des fils inactifs depuis plus de 8 jours.
+async function restoreTurns($) {
+  const now = await $.clock.now();
+  try {
+    for (const key of await $.store.keys()) {
+      if (!key.startsWith(TURNS_PREFIX)) continue;
+      const saved = await $.store.get(key);
+      if (key === turnsKey && saved && Array.isArray(saved.readings)) readings = saved.readings.filter((r) => r && r.window > 0).slice(-HISTORY);
+      else if (!saved || !(now - saved.at < TURNS_KEEP_MS)) await $.store.delete(key);
+    }
+  } catch {
+    // Stockage illisible : la ligne repart de zéro.
+  }
+}
+
+async function saveTurns($) {
+  if (!turnsKey) return;
+  try {
+    await $.store.set(turnsKey, { at: await $.clock.now(), readings });
+  } catch {
+    // Pas de sauvegarde ce tour-ci : les barres reviendront au tour suivant.
+  }
 }
 
 // ---------- Limites : mesure partagée ----------
@@ -263,8 +299,8 @@ function drawLine(elements, surface, columns, now) {
     if (readings.length >= 2) {
       const curve =
         surface === "desktop" && Svg
-          ? Svg({ key: "spark", source: sparkSvg(SPARK_COLORS[f.color] ?? SPARK_COLORS.blue), alt: `Contexte sur les ${readings.length} derniers tours`, width: SPARK.width, height: SPARK.height })
-          : Text({ key: "spark", color: f.color, children: chart() });
+          ? Svg({ key: "spark", source: barsSvg(SPARK_COLORS[f.color] ?? SPARK_COLORS.blue), alt: `Tokens ajoutés par les ${turnDeltas().length} derniers prompts`, width: barsWidth(turnDeltas().length), height: SPARK.height })
+          : Box({ key: "spark", flexDirection: "row", children: chartText(Text, f.color) });
       const turns = [Text({ key: "t", dimColor: true, children: "tours" }), curve];
       const trend = trendWord();
       if (trend) turns.push(Text({ key: "d", dimColor: true, children: trend }));
@@ -293,7 +329,7 @@ function textWidth(gauges) {
     const cur = readings[readings.length - 1];
     width += 2 + forecastFor(cur.percent).word.length;
     width += `${cur.percent} % contexte · ${short(cur.tokens)}/${short(cur.window)}`.length;
-    if (readings.length >= 2) width += 6 + readings.length + 1 + trendWord().length;
+    if (readings.length >= 2) width += 6 + turnDeltas().length + 1 + trendWord().length;
   }
   for (const g of gauges) width += g.label.length + 1 + TEXT_CELLS + 1 + g.value.length + (g.detail ? 1 + g.detail.length : 0);
   const blocks = (readings.length > 0 ? (readings.length >= 2 ? 3 : 2) : 0) + gauges.length;
@@ -317,6 +353,9 @@ function pushReading(context) {
   const percent = Math.round(context.percent ?? (tokens / context.window) * 100);
   // Le relevé de démarrage vaut 0 avant la première réponse : l'écarter dès qu'un vrai arrive.
   readings = readings.filter((r) => r.tokens > 0);
+  // Une réouverture relit le même contexte : pas de relevé en double, donc pas de fausse barre vide.
+  const last = readings[readings.length - 1];
+  if (last && last.tokens === tokens && tokens > 0) return;
   readings.push({ tokens, window: context.window, percent });
   if (readings.length > HISTORY) readings = readings.slice(-HISTORY);
 }
@@ -325,23 +364,48 @@ function forecastFor(percent) {
   return FORECAST.find((band) => percent < band.upTo) ?? FORECAST[FORECAST.length - 1];
 }
 
-// Barres sur l'échelle de la fenêtre (0 à 100 %) : la pente se lit, un tour coûteux fait une marche.
-function chart() {
-  return readings.map((r) => BARS[Math.min(BARS.length - 1, Math.max(0, Math.round((r.percent / 100) * (BARS.length - 1))))]).join("");
+// Tokens ajoutés par chacun des derniers prompts (au plus TURN_BARS), du plus ancien au plus récent.
+// Une compaction fait baisser le contexte : ce prompt compte pour 0.
+function turnDeltas() {
+  const deltas = [];
+  for (let i = 1; i < readings.length; i++) deltas.push(Math.max(0, readings[i].tokens - readings[i - 1].tokens));
+  return deltas.slice(-TURN_BARS);
 }
 
-// Courbe pleine du remplissage du contexte, de 0 (bas) à 100 % (haut), sur les derniers tours.
-function sparkSvg(color) {
-  const { width, height } = SPARK;
-  const step = readings.length > 1 ? width / (readings.length - 1) : width;
-  const points = readings.map((r, i) => `${(i * step).toFixed(1)},${(height - (Math.min(100, Math.max(0, r.percent)) / 100) * (height - 1) - 0.5).toFixed(1)}`);
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
-    `<rect width="${width}" height="${height}" rx="2" fill="${TRACK}"/>` +
-    `<polygon points="0,${height} ${points.join(" ")} ${width},${height}" fill="${color}" fill-opacity="0.35"/>` +
-    `<polyline points="${points.join(" ")}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>` +
-    `</svg>`
-  );
+// Hauteur relative au prompt le plus lourd affiché : le prompt qui a coûté le plus remplit la hauteur.
+function barLevels() {
+  const deltas = turnDeltas();
+  const top = Math.max(...deltas, 1);
+  return deltas.map((d) => d / top);
+}
+
+// Terminal : un caractère par prompt, les précédents en gris, l'actuel dans la teinte de la météo.
+function chartText(Text, color) {
+  const glyphs = barLevels().map((level) => BARS[Math.round(level * (BARS.length - 1))]);
+  const last = glyphs.pop();
+  const parts = [];
+  if (glyphs.length > 0) parts.push(Text({ key: "past", dimColor: true, children: glyphs.join("") }));
+  parts.push(Text({ key: "now", color, children: last }));
+  return parts;
+}
+
+// Largeur juste pour n barres : la zone grandit avec les prompts, sans vide à côté de « tours ».
+function barsWidth(n) {
+  return Math.max(1, n) * SPARK.bar + Math.max(0, n - 1) * SPARK.gap;
+}
+
+// App : barres arrondies, la plus récente en couleur ; un prompt à 0 garde un trait au sol.
+function barsSvg(color) {
+  const { height, bar, gap } = SPARK;
+  const levels = barLevels();
+  const width = barsWidth(levels.length);
+  const x0 = 0;
+  const rects = levels.map((level, i) => {
+    const h = Math.max(1, level * height);
+    const fill = i === levels.length - 1 ? color : PAST_BAR;
+    return `<rect x="${(x0 + i * (bar + gap)).toFixed(1)}" y="${(height - h).toFixed(1)}" width="${bar}" height="${h.toFixed(1)}" rx="1.5" fill="${fill}"/>`;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${rects.join("")}</svg>`;
 }
 
 function trendWord() {
