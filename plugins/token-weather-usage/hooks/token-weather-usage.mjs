@@ -27,7 +27,29 @@ const FORECAST = [
 const TURN_BARS = 8;
 const SPARK = { height: 14, bar: 5.5, gap: 2 };
 const PAST_BAR = "rgba(127,127,127,0.45)";
-const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#3b7dd8", magenta: "#b04fc0", red: "#d64545" };
+const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#2f68c0", magenta: "#b04fc0", red: "#d64545" };
+
+// Icônes météo dessinées pour l'app (le terminal garde les symboles Unicode de FORECAST) : pleines,
+// 15 px, chacune dans sa teinte. « Compacter bientôt » reprend le zigzag ↯, en trait épais.
+const WEATHER_ICON_SIZE = 15;
+const WEATHER_ICONS = {
+  Clair: (c) =>
+    `<circle cx="12" cy="12" r="4.5" fill="${c}"/><path fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`,
+  Nuageux: (c) =>
+    `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M7 18.5a3.75 3.75 0 0 1-.4-7.48A5.6 5.6 0 0 1 17.2 9.6a4.45 4.45 0 0 1 .3 8.9z"/>`,
+  Averses: (c) =>
+    `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M7 14.5a3.25 3.25 0 0 1-.35-6.48A5 5 0 0 1 16.2 6.8a3.85 3.85 0 0 1 .3 7.7z"/><path fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" d="M8.5 17.5l-1 2.5M12.5 17.5l-1 2.5M16.5 17.5l-1 2.5"/>`,
+  Orage: (c) => `<path fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" d="M13.5 2 5 13.5h6.5L10.5 22 19 10.5h-6.5z"/>`,
+  "Compacter bientôt": (c) =>
+    `<path fill="none" stroke="${c}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" d="M14 2 7 12h8l-5 9M14.5 18.8 10 21l-.5-5"/>`,
+};
+const WEATHER_ICON_COLORS = { Clair: "#e0b000", Nuageux: "#8ea3b8", Averses: "#2f68c0", Orage: "#b04fc0", "Compacter bientôt": "#d64545" };
+
+function weatherSvg(word) {
+  const draw = WEATHER_ICONS[word];
+  if (!draw) return null;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24">${draw(WEATHER_ICON_COLORS[word])}</svg>`;
+}
 
 // Relevés du contexte : { tokens, window, percent }, du plus ancien au plus récent.
 let readings = [];
@@ -286,7 +308,11 @@ function drawLine(elements, surface, columns, now) {
   if (readings.length > 0) {
     const cur = readings[readings.length - 1];
     const f = forecastFor(cur.percent);
-    blocks.push(Box({ key: "weather", flexDirection: "row", columnGap: 1, children: [Text({ color: f.color, bold: true, children: f.icon }), Text({ children: f.word })] }));
+    const iconSvg = surface === "desktop" && Svg ? weatherSvg(f.word) : null;
+    const icon = iconSvg
+      ? Svg({ key: "icon", source: iconSvg, alt: f.word, width: WEATHER_ICON_SIZE, height: WEATHER_ICON_SIZE })
+      : Text({ key: "icon", color: f.color, bold: true, children: f.icon });
+    blocks.push(Box({ key: "weather", flexDirection: "row", columnGap: 1, alignItems: "center", children: [icon, Text({ key: "word", children: f.word })] }));
     blocks.push(
       Box({
         key: "context",

@@ -10,7 +10,7 @@ Une ligne au-dessus du prompt, dans le terminal comme dans l'app de bureau :
 ☁ Nuageux │ 44 % contexte · 440k/1M │ tours ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━┃──── 37 % · 2h22 → 18:20 │ 7j ━━━━┃─── 60 % · 2j23h
 ```
 
-- **Météo du contexte** : de Clair à « Compacter bientôt », selon la part de la fenêtre de contexte utilisée.
+- **Météo du contexte** : de Clair à « Compacter bientôt », selon la part de la fenêtre de contexte utilisée. Icônes dessinées dans l'app (soleil, nuage, averse, éclair, zigzag), symboles Unicode dans le terminal.
 - **Contexte** : pourcentage et tokens utilisés sur la fenêtre.
 - **Tours** : une barre par prompt sur les 8 derniers, de hauteur égale aux tokens ajoutés (le prompt le plus lourd remplit la hauteur) ; le prompt actuel en couleur, les précédents en gris. Puis l'écart du dernier prompt. Affiché à partir du deuxième prompt, et conservé après un redémarrage.
 - **5h / 7j** : part consommée des limites du compte. Le trait bleu marque le temps écoulé de la fenêtre.

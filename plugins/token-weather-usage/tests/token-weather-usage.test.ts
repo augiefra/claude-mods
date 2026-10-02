@@ -86,6 +86,7 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(texts).toContain("Clair");
     expect(texts).toContain("▲ +10k");
     if (surface === "terminal") {
+      expect(texts).toContain("☀");
       // Précédents en gris (+20k puis +80k, le plus lourd), prompt actuel (+10k) en couleur.
       expect(texts).toContain("▃█");
       const now: any = await ui.find({ type: "Text", text: "▂" });
@@ -93,7 +94,9 @@ for (const surface of ["terminal", "desktop"] as const) {
     }
     else {
       const svgs = await ui.findAll({ type: "Svg" });
-      expect(svgs.length).toBe(3);
+      // Icône météo dessinée, barres des tours, deux jauges.
+      expect(svgs.length).toBe(4);
+      expect(texts).not.toContain("☀");
     }
   });
 }
