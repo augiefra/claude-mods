@@ -6,7 +6,7 @@
     {
       "name": "token-weather-usage",
       "source": "./plugins/token-weather-usage",
-      "description": "Context weather and your 5-hour / 7-day limits against the clock, on one line above the prompt."
+      "description": "Context, 5-hour and 7-day limits against the clock, prompt cache countdown, session cost and running agents, in one band above the prompt."
     }
   ]
 }

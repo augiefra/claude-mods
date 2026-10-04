@@ -37,13 +37,32 @@ for (const surface of ["terminal", "desktop"] as const) {
     withUsage(on, LIMITS);
     await $.session.start({ source: "startup", cwd: "/tmp" } as any);
     const { ui, texts } = await band($, surface);
-    expect(texts).toContain("Clear");
-    expect(texts).toContain("11% context");
+    // The context in tokens alone; the weather word goes to the icon's tooltip.
+    expect(texts).toContain("107k");
+    expect(texts).not.toContain("11% context");
     expect(texts).toContain("5h");
     expect(texts).toContain("32%");
-    expect(texts).toContain(`· 3h00 → ${at(NOW + 3 * 3_600_000)}`);
+    const dot = surface === "terminal" ? "· " : "";
+    expect(texts).toContain(`${dot}3h00 → ${at(NOW + 3 * 3_600_000)}`);
     expect(texts).toContain("59%");
-    expect(texts).toContain("· 3d00h");
+    expect(texts).toContain(`${dot}3d00h`);
+    // No request yet: the cache block waits, no cost without a ledger.
+    expect(texts).toContain("cache");
+    expect(texts).toContain("—");
+    if (surface === "desktop") {
+      const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+      expect(svgs.some((s) => s.props?.alt === "Clear · 11% of 1M" && String(s.props?.source).includes("<title>"))).toBe(true);
+      // Pills: tinted and rounded, without the border's vertical padding.
+      const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor);
+      expect(pills.length).toBe(4);
+      for (const p of pills) {
+        expect(p.props?.borderStyle).toBe("round");
+        expect(p.props?.paddingY).toBe(0);
+      }
+    } else {
+      expect(texts).toContain("☀");
+      expect(texts).not.toContain("Clear");
+    }
     // 5 hours before 7 days, whatever the order received.
     expect(texts.indexOf("5h")).toBeLessThan(texts.indexOf("7d"));
     // A single reading: no turns chart yet.
@@ -62,8 +81,7 @@ test("auto: French when LANG is French", async ($, on) => {
   withUsage(on, LIMITS);
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   const { texts } = await band($, "terminal");
-  expect(texts).toContain("Clair");
-  expect(texts).toContain("11 % contexte");
+  expect(texts).toContain("107k");
   expect(texts).toContain("32 %");
   expect(texts).toContain("7j");
   expect(texts).toContain("· 3j00h");
@@ -74,7 +92,7 @@ test("auto: LC_ALL comes before LANG", async ($, on) => {
   withUsage(on, LIMITS);
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   const { texts } = await band($, "terminal");
-  expect(texts).toContain("Clair");
+  expect(texts).toContain("7j");
 });
 
 test("auto: English when LANG is another language", async ($, on) => {
@@ -82,7 +100,6 @@ test("auto: English when LANG is another language", async ($, on) => {
   withUsage(on, LIMITS);
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   const { texts } = await band($, "terminal");
-  expect(texts).toContain("Clear");
   expect(texts).toContain("7d");
 });
 
@@ -112,8 +129,7 @@ for (const surface of ["terminal", "desktop"] as const) {
     await $.session.start({ source: "startup", cwd: "/tmp" } as any);
     for (let i = 0; i < 3; i++) await ($ as any).turn.complete({ answer: "ok" } as any);
     const { ui, texts } = await band($, surface);
-    expect(texts).toContain("turns");
-    expect(texts).toContain("Clear");
+    expect(texts).toContain("210k");
     expect(texts).toContain("▲ +10k");
     if (surface === "terminal") {
       expect(texts).toContain("☀");
@@ -122,9 +138,13 @@ for (const surface of ["terminal", "desktop"] as const) {
       const now: any = await ui.find({ type: "Text", text: "▂" });
       expect(now?.props?.color).toBe("yellow");
     } else {
-      const svgs = await ui.findAll({ type: "Svg" });
-      // Drawn weather icon, turn bars, two gauges.
-      expect(svgs.length).toBe(4);
+      const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+      // Drawn weather icon, turn bars, two gauges; every drawing carries its alt text.
+      const alts = svgs.map((s) => String(s.props?.alt ?? ""));
+      expect(alts.every((a) => a.length > 0)).toBe(true);
+      expect(alts.filter((a) => a.startsWith("Tokens added") || a.includes(" used") || a.startsWith("Clear")).length).toBe(4);
+      // Small icons: gauge, calendar, two reset clocks, cache.
+      for (const a of ["5-hour limit", "7-day limit", "Resets in", "Prompt cache"]) expect(alts).toContain(a);
       expect(texts).not.toContain("☀");
     }
   });
@@ -182,7 +202,6 @@ test("after a restart, the turn bars come back", async ($, on) => {
   withUsage(on, LIMITS, { tokens: 200_000, window: 1_000_000, percent: 20 });
   await $.session.start({ source: "resume", cwd: "/tmp" } as any);
   const { texts } = await band($, "terminal");
-  expect(texts).toContain("turns");
   expect(texts).toContain("▲ +80k");
   // The session idle for more than 8 days is deleted, not this one.
   expect(store.has("turns:old-session")).toBe(false);
@@ -214,3 +233,141 @@ for (const surface of ["terminal", "desktop"] as const) {
     }
   });
 }
+
+// ---------- Prompt cache and cost ----------
+
+// One main-loop request answered with this usage.
+async function step($: any, usage: Record<string, unknown>, model = "claude-opus-5-5") {
+  const stream = $.turn.step({ turnId: "t", index: 0, model, messageCount: 2 });
+  for await (const _ of stream) {
+  }
+  return stream.result;
+}
+
+function engineStep(on: any, usages: Record<string, unknown>[]) {
+  let call = 0;
+  on("turn.step", async function* () {
+    const usage = usages[Math.min(call++, usages.length - 1)];
+    return { turnId: "t", index: 0, answer: "", toolUses: [], stopReason: "end_turn", usage };
+  });
+}
+
+const HIT = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 98_000, cache_creation_input_tokens: 1_700, output_tokens: 500 };
+const MISS = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 99_700, output_tokens: 500 };
+
+test("cache: share read and time left on a subscription (1 hour)", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, HIT);
+  const { ui, texts } = await band($, "terminal");
+  expect(texts).toContain("cache");
+  expect(texts).toContain("98%");
+  // 1 hour left, counted from the request's start.
+  expect(texts).toContain("· 1h00");
+  const time: any = await ui.find({ type: "Text", text: "· 1h00" });
+  expect(time?.props?.dimColor).toBe(true);
+});
+
+test("cache: yellow under 10 minutes, then expired with /compact", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, {});
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  withUsage(on, LIMITS);
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await (clock as any).advance(55 * 60_000);
+  let { ui, texts } = await band($, "terminal");
+  expect(texts).toContain("· 5 min");
+  const soon: any = await ui.find({ type: "Text", text: "· 5 min" });
+  expect(soon?.props?.color).toBe("yellow");
+  await (clock as any).advance(6 * 60_000);
+  ({ ui, texts } = await band($, "terminal"));
+  expect(texts).toContain("expired");
+  // 107k of context: past 100k, /compact before going on.
+  expect(texts).toContain("· /compact");
+  const expired: any = await ui.find({ type: "Text", text: "expired" });
+  expect(expired?.props?.color).toBe("red");
+});
+
+test("cache: a miss after a model change names the cause", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  engineStep(on, [HIT, { ...MISS, model: "claude-sonnet-5-5" }]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await step($, MISS, "claude-sonnet-5-5");
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("0%");
+  expect(texts).toContain("· missed · model changed");
+});
+
+test("cache: 5 minutes on an API key (no plan window)", async ($, on) => {
+  world(on);
+  withUsage(on, []);
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, HIT);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("· 5 min");
+});
+
+test("cost: shown in dollars, French format", async ($, on) => {
+  world(on, { LANG: "fr_FR.UTF-8" });
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS, cost: { usd: 4.321 } } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  for (const surface of ["terminal", "desktop"] as const) {
+    const { ui, texts } = await band($, surface);
+    expect(texts).toContain("≈ 4,32 $");
+    if (surface === "desktop") {
+      const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+      expect(svgs.some((s) => s.props?.alt === "Coût du fil" && String(s.props?.source).includes("#b8892a"))).toBe(true);
+    }
+  }
+});
+
+test("cost: the last prompt's share next to the total", async ($, on) => {
+  world(on);
+  on("turn.complete", () => ({ text: "" }));
+  const costs = [4.0, 4.84];
+  let call = 0;
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000 + call * 1_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS, cost: { usd: costs[Math.min(call++, costs.length - 1)] } } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await ($ as any).turn.complete({ answer: "ok" } as any);
+  const terminal = await band($, "terminal");
+  expect(terminal.texts).toContain("≈ $4.84");
+  expect(terminal.texts).toContain("(+$0.84)");
+  const desktop = await band($, "desktop");
+  expect(desktop.texts).toContain("+$0.84");
+  const svgs = (await desktop.ui.findAll({ type: "Svg" })) as any[];
+  expect(svgs.some((s) => s.props?.alt === "Last prompt")).toBe(true);
+});
+
+test("agents: a pill while subagents run, gone once they finish", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  let list = [
+    { id: "a1", description: "Review the diff", type: "Plan", status: "running" },
+    { id: "a2", description: "Search the repo", type: "Explore", status: "running" },
+    { id: "a0", description: "Earlier", type: "Explore", status: "completed" },
+  ];
+  on("agent.list", () => ({ value: list }));
+  on("turn.complete", () => ({ text: "" }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const desktop = await band($, "desktop");
+  expect(desktop.texts).toContain("2 agents");
+  const svgs = (await desktop.ui.findAll({ type: "Svg" })) as any[];
+  const robot = svgs.find((s) => s.props?.alt === "Agents running");
+  expect(String(robot?.props?.source)).toContain("Plan · Review the diff");
+  expect(robot?.props?.isInteractive).toBe(true);
+  list = list.map((a) => ({ ...a, status: "completed" }));
+  await ($ as any).turn.complete({ answer: "ok", agentId: "a1" } as any);
+  const after = await band($, "terminal");
+  expect(after.texts.some((t: string) => t.includes("agent"))).toBe(false);
+});

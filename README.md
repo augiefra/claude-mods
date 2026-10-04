@@ -4,30 +4,43 @@
 
 ## token-weather-usage
 
-Stop hitting your Claude limit by surprise. One line above the prompt shows your 5-hour and weekly limits against the clock, how full your context is, and what each prompt cost.
+Stop hitting your Claude limit by surprise. One band above the prompt shows how big your context is, your 5-hour and weekly limits against the clock, whether the prompt cache is still warm, what the session and the last prompt cost, and which agents are running.
 
-In the desktop app:
+![One session, step by step](docs/band-story.gif)
 
-![The band in the desktop app](docs/band.png)
+### Four situations
 
-In the terminal:
+**All clear.** Small context, both limits behind the clock, the cache warm for almost an hour.
+
+![All clear](docs/situations/calm.png)
+
+**Agents at work.** Three subagents running (hover the robot for their tasks); the 5-hour limit runs a little ahead of time, so its gauge turns yellow.
+
+![Agents at work](docs/situations/agents.png)
+
+**Cache about to lapse.** Seven minutes left: send the next message now, or the whole 604k context gets written again at full price.
+
+![Cache about to lapse](docs/situations/soon.png)
+
+**Slow down.** Context near full, the 5-hour limit far ahead of time, the cache expired: `/compact` before going on.
+
+![Slow down](docs/situations/alert.png)
+
+### What each pill says
+
+- **Context**: tokens in the context, with a weather icon from Clear to "Compact soon" (hover it for the share of the window). Then one bar per prompt for the last 8, as tall as the tokens it added, the current one in color, and the last prompt's change.
+- **5h / 7d**: the share of your account's limits already used. The gap with the time elapsed is hatched: grey after the bar while you have margin, in the bar's color when you use faster than time passes. Green while usage does not run ahead of time; yellow beyond; red when more than 15 points ahead or past 90%. Then the time left and, for the 5-hour limit, the reset time (machine's time zone). A window that already reset is hidden until the next reading; the latest reading is shared across the sessions open on the machine.
+- **Cache**: the share of the last message read from the prompt cache, then the time before the cache lapses. Each message restarts the clock: 1 hour on a Claude subscription, 5 minutes on an API key. Mods get the token counts but not the lifetime, so it follows Claude Code's rules and corrects itself from what the traffic shows. Yellow under 10 minutes; "missed" with its cause (model changed, lapsed, start changed) when a message had to write the cache again; red "expired" once it lapsed, with `/compact` past 100k tokens of context.
+- **Cost**: what the session cost, as `/cost` totals it, and what the last prompt added (its subagents included). On a subscription it is the API-price equivalent, not a bill, hence the "≈".
+- **Agents**: shown only while subagents run; hover the robot for the type and task of each. Background shell commands are not counted (Claude Code does not expose them to mods).
+
+In the desktop app each block is a tinted pill with its icon. In the terminal the same blocks sit on one line, split by a thin rule:
 
 ```
-☂ Showers │ 63% context · 634k/1M │ turns ▃▆▂█▃▄▂▆ ▲ +6.3k │ 5h ━━━━━━╍─ 74% · 24 min → 18:20 │ 7d ━━━━━─── 65% · 2d20h
+☂ 634k ▃▆▂█▃▄▂▆ ▲ +6.3k │ 5h ━━━━━━╍─ 74% · 24 min → 18:20 │ 7d ━━━━━─── 65% · 2d20h │ cache 98% · 52 min │ ≈ $41.07 (+$0.58) │ 2 agents
 ```
 
-- **5h / 7d**: the share of your account's limits already used. The gap with the time elapsed in the window is hatched: grey after the bar while you have margin, in the bar's color when you use faster than time passes.
-  Green while usage does not run ahead of time; yellow beyond; red when more than 15 points ahead or past 90%.
-  The percentage stays in the text color, red only on alert. Then the time left and, for the 5-hour limit, the reset time (machine's time zone).
-  A window that already reset is hidden until the next reading. The latest reading is shared across the sessions open on the machine.
-
-  ![Hatching of the gap with elapsed time](docs/gauges-hatching.png)
-
-- **Context weather**: from Clear to "Compact soon", by the share of the context window in use. Icons drawn in the app (sun, cloud, showers, lightning, zigzag), Unicode symbols in the terminal.
-- **Context**: percentage and tokens used out of the window.
-- **Turns**: one bar per prompt for the last 8, as tall as the tokens it added (the heaviest prompt fills the height); the current prompt in color, earlier ones in grey. Then the last prompt's change. Shown from the second prompt on, and kept across restarts.
-
-Gauges and bars are drawn as SVG in the desktop app and as characters in the terminal. When the line does not fit the terminal, the bars and details drop out, leaving labels and percentages.
+When the line does not fit the terminal, the bars, details and cost drop out, leaving labels and percentages.
 
 ### Language
 
@@ -52,12 +65,13 @@ claude plugin test ./plugins/token-weather-usage
 
 ## Privacy
 
-token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits) and the locale variables above, and keeps in the plugin's local storage, on the machine, the latest limits reading and, per session, recent context readings (deleted after 8 idle days). No network requests.
+token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits, session cost, each request's cache token counts), the list of the session's subagents, the locale variables above and the prompt-cache switches (`DISABLE_PROMPT_CACHING`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`). It keeps in the plugin's local storage, on the machine, the latest limits reading and, per session, recent context readings, the last request's cache figures and the last prompt's cost (deleted after 8 idle days). No network requests.
 
 ## Credits
 
 - The context weather, the tokens and the turns chart come from Anthropic's **Token Weather** example ([claude-code-playground](https://github.com/anthropics/claude-code-playground), Apache-2.0).
 - The limit gauges are inspired by HolyGrail's **usage-meter** ([HolyGrail/claude-mods](https://github.com/HolyGrail/claude-mods/tree/main/plugins/usage-meter)). They were written for this mod after usage-meter (same idea: gauges with an elapsed-time marker, a reading shared across sessions), without copying its code.
+- The cache block is inspired by Daniel San's **prompt-cache-control** ([davila7/claude-code-templates](https://github.com/davila7/claude-code-templates), MIT). It was written for this mod after it (same idea: cache usage per request, an inferred lifetime, a countdown), without copying its code.
 
 ## License
 
