@@ -1,6 +1,6 @@
 {
   "name": "token-weather-usage",
-  "version": "3.9.4",
+  "version": "3.9.5",
   "description": "One line above the prompt: context tokens with their weather, a bar per recent prompt, your 5-hour and 7-day limits against the time elapsed, the prompt cache with its time left, the session cost with the last prompt's share, and the subagents running. Labels in English or French. After Token Weather (Anthropic, Apache-2.0) and the ideas of usage-meter (HolyGrail) and prompt-cache-control (Daniel San).",
   "author": {
     "name": "Eric Cologni"
@@ -22,10 +22,8 @@
     "language": {
       "type": "string",
       "title": "Language",
-      "description": "Labels in English (en) or French (fr). auto follows LC_ALL, LC_MESSAGES or LANG, and falls back to English.",
-      "required": false,
-      "default": "auto",
-      "options": ["auto", "en", "fr"]
+      "description": "Labels in English (en) or French (fr), or auto: follows LC_ALL, LC_MESSAGES or LANG, and falls back to English.",
+      "default": "auto"
     }
   }
 }
