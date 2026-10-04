@@ -1,6 +1,6 @@
 {
   "name": "token-weather-usage",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "One line above the prompt: context weather, tokens, a bar per recent prompt, then your 5-hour and 7-day limits against the time elapsed, with the reset time. Labels in English or French. After Token Weather (Anthropic, Apache-2.0) and the idea of usage-meter (HolyGrail).",
   "author": {
     "name": "Eric Cologni"

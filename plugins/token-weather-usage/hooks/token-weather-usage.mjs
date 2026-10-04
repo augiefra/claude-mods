@@ -428,11 +428,12 @@ function textWidth(gauges) {
 }
 
 // True for a tree with nothing to show: nothing, empty text, or nested empty boxes and texts.
+// An element carries its children beside its props, not inside them.
 function isBlank(node) {
   if (node == null || node === false || node === "") return true;
   if (Array.isArray(node)) return node.every(isBlank);
   if (typeof node === "string") return node.trim() === "";
-  if (typeof node === "object" && (node.type === "Box" || node.type === "Text")) return isBlank(node.props?.children);
+  if (typeof node === "object" && (node.type === "Box" || node.type === "Text")) return isBlank(node.children ?? node.props?.children);
   return false;
 }
 

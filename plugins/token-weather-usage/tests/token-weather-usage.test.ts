@@ -11,14 +11,18 @@ const LIMITS = [
   { kind: "five_hour", percentUsed: 32, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString() },
 ];
 
-function world(on: any, env: Record<string, string> = {}, stored: Record<string, unknown> = {}) {
+// `below`: what the mods after this one draw in the band; nothing by default.
+function world(on: any, env: Record<string, string> = {}, stored: Record<string, unknown> = {}, below?: string) {
   mock.clock(on, { now: NOW });
   mock.store(on, stored);
   mock.env(on, env);
   on("session.id", () => ({ value: "session-1" }));
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
   on("ui.invalidate", () => ({ value: undefined }));
-  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  on("ui.render", ($: any, e: any) => {
+    const { Box, Text } = $.ui.resolve(e);
+    return below ? Text({ children: below }) : Box({ children: [] });
+  });
 }
 
 function withUsage(on: any, rateLimits: unknown[], context = { tokens: 107_000, window: 1_000_000, percent: 11 }) {
@@ -54,6 +58,16 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(value?.props?.bold).toBe(true);
   });
 }
+
+// The band is shared: what the mods after this one draw stays, under the line.
+test("keeps what later mods draw under the line", async ($, on) => {
+  world(on, {}, {}, "drawn after this mod");
+  withUsage(on, LIMITS);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("drawn after this mod");
+  expect(texts.indexOf("Clear")).toBeLessThan(texts.indexOf("drawn after this mod"));
+});
 
 // The language option (en, fr) is not tested here: test(name, { options }, body) does not reach
 // register() in Claude Code 2.1.286. It was checked in a real session instead.
