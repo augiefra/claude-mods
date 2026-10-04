@@ -94,11 +94,15 @@ const WEATHER_ICONS = {
 };
 const WEATHER_ICON_COLORS = { clear: "#e0b000", cloudy: "#8ea3b8", showers: "#2f68c0", storm: "#b04fc0", compact: "#d64545" };
 
+// An interactive Svg (for its tooltip) is drawn in a frame of its own: without a color scheme
+// matching the app's, the browser paints that frame white in dark mode.
+const FRAME_SCHEME = "<style>:root{color-scheme:light dark}</style>";
+
 // The weather word lives in the icon's tooltip: the pill keeps the tokens alone.
 function weatherSvg(id, title) {
   const draw = WEATHER_ICONS[id];
   if (!draw) return null;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24"><title>${escapeXml(title)}</title>${draw(WEATHER_ICON_COLORS[id])}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>${draw(WEATHER_ICON_COLORS[id])}</svg>`;
 }
 
 // Context readings: { tokens, window, percent }, oldest first.
@@ -685,7 +689,7 @@ function drawLine(elements, surface, columns, now) {
     if (desktop) {
       // The tooltip lists what each one is doing.
       const title = agents.map((a) => `${a.type} · ${a.description}`).join("\n");
-      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}" viewBox="0 0 24 24"><title>${escapeXml(title)}</title>${ICONS.agents(ICON_COLORS.agents)}</svg>`;
+      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}" viewBox="0 0 24 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>${ICONS.agents(ICON_COLORS.agents)}</svg>`;
       parts.push(Svg({ key: "i", source, alt: T.icons.agents, width: ICON_SIZE, height: ICON_SIZE, isInteractive: true }));
     }
     parts.push(Text({ key: "v", bold: true, children: T.agents(agents.length) }));

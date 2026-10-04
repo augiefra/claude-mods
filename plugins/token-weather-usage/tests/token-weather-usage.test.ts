@@ -52,6 +52,8 @@ for (const surface of ["terminal", "desktop"] as const) {
     if (surface === "desktop") {
       const svgs = (await ui.findAll({ type: "Svg" })) as any[];
       expect(svgs.some((s) => s.props?.alt === "Clear · 11% of 1M" && String(s.props?.source).includes("<title>"))).toBe(true);
+      // Every interactive drawing declares a color scheme, or its frame turns white in dark mode.
+      for (const s of svgs.filter((s) => s.props?.isInteractive)) expect(String(s.props?.source)).toContain("color-scheme:light dark");
       // Pills: tinted and rounded, without the border's vertical padding.
       const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor);
       expect(pills.length).toBe(4);
