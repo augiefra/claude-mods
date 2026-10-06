@@ -13,13 +13,14 @@ const LIMITS = [
 
 // below: what a mod placed after this one draws under the line.
 function world(on: any, env: Record<string, string> = {}, stored: Record<string, unknown> = {}, below?: string) {
-  mock.clock(on, { now: NOW });
+  const clock = mock.clock(on, { now: NOW });
   mock.store(on, stored);
   mock.env(on, env);
   on("session.id", () => ({ value: "session-1" }));
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
   on("ui.invalidate", () => ({ value: undefined }));
   on("ui.render", ($: any, e: any) => (below ? $.ui.resolve(e).Text({ children: below }) : $.ui.resolve(e).Box({ children: [] })));
+  return clock as any;
 }
 
 function withUsage(on: any, rateLimits: unknown[], context = { tokens: 107_000, window: 1_000_000, percent: 11 }) {
@@ -28,8 +29,41 @@ function withUsage(on: any, rateLimits: unknown[], context = { tokens: 107_000, 
 
 async function band($: any, surface: "terminal" | "desktop", columns = 200) {
   const ui = await $.ui.mount({ plugin: "token-weather-usage", surface, component: "AbovePrompt", props: { bodyColumns: columns } as any });
-  const texts = (await ui.findAll({ type: "Text" })).map((t: any) => t.text);
+  // The hover cards' lines are hidden until hovered: left out of the band's texts.
+  const hidden = ((await ui.findAll({ type: "Box" })) as any[])
+    .filter((b) => b.props?.position === "absolute")
+    .flatMap((b) => ((b.children ?? []) as any[]).map((t) => strings(t).join("")));
+  const texts: string[] = [];
+  for (const t of (await ui.findAll({ type: "Text" })) as any[]) {
+    const i = hidden.indexOf(t.text);
+    if (i >= 0) hidden.splice(i, 1);
+    else texts.push(t.text);
+  }
   return { ui, texts };
+}
+
+// The hover cards drawn inside the pills, as element descriptions.
+async function cardNodes(ui: any): Promise<any[]> {
+  const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.key);
+  return pills.flatMap((p) => ((p.children ?? []) as any[]).filter((c) => c && typeof c === "object" && c.props?.position === "absolute"));
+}
+
+// Every string beneath a drawn element description, in order.
+function strings(node: any): string[] {
+  if (node == null || node === false) return [];
+  if (typeof node === "string" || typeof node === "number") return [String(node)];
+  if (Array.isArray(node)) return node.flatMap(strings);
+  return strings(node.children ?? node.props?.children);
+}
+
+// The hover card of a pill (by its key), its lines joined by newlines; null without one.
+async function cardOf(ui: any, pillKey: string): Promise<string | null> {
+  const pill: any = await ui.find({ type: "Box", key: pillKey });
+  const kids = (pill?.children ?? []) as any[];
+  const card = kids.find((c) => c && typeof c === "object" && c.props?.position === "absolute");
+  if (!card) return null;
+  const lines = ((card.children ?? card.props?.children ?? []) as any[]).map((t) => strings(t).join(""));
+  return lines.join("\n");
 }
 
 for (const surface of ["terminal", "desktop"] as const) {
@@ -54,11 +88,24 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(texts).toContain("—");
     if (surface === "desktop") {
       const svgs = (await ui.findAll({ type: "Svg" })) as any[];
-      expect(svgs.some((s) => s.props?.alt === "Clear · 11% of 1M" && String(s.props?.source).includes("<title>"))).toBe(true);
-      // Every interactive drawing declares a color scheme, or its frame turns white in dark mode.
-      for (const s of svgs.filter((s) => s.props?.isInteractive)) expect(String(s.props?.source)).toContain("color-scheme:light dark");
+      // The weather word sits in the context pill's hover card; no drawing is interactive any more
+      // (the app shows no SVG tooltip).
+      expect(svgs.some((s) => s.props?.alt === "Clear · 11% of 1M")).toBe(true);
+      expect(await cardOf(ui, "context")).toBe("Clear · 11% of 1M");
+      for (const s of svgs) expect(s.props?.isInteractive).toBeFalsy();
+      // No request yet: no card on the cache pill.
+      expect(await cardOf(ui, "cache")).toBeNull();
+      // Hover cards: hidden, revealed by the pill's hover, in the theme's colors.
+      const cards = await cardNodes(ui);
+      expect(cards.length).toBeGreaterThan(0);
+      for (const c of cards) {
+        expect(c.props?.display).toBe("none");
+        expect((c.hover ?? c.props?.hover)?.display).toBe("flex");
+        expect(c.props?.backgroundColor).toBe("background");
+        expect(c.props?.key).toBeUndefined();
+      }
       // Pills: tinted and rounded, without the border's vertical padding.
-      const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor);
+      const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor && b.props?.position !== "absolute");
       expect(pills.length).toBe(4);
       for (const p of pills) {
         expect(p.props?.borderStyle).toBe("round");
@@ -269,6 +316,26 @@ function engineStep(on: any, usages: Record<string, unknown>[]) {
 const HIT = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 98_000, cache_creation_input_tokens: 1_700, output_tokens: 500 };
 const MISS = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 99_700, output_tokens: 500 };
 
+// The mod's list prices for the models used here, USD per million tokens (Anthropic, 2026-09-25).
+const PRICE: Record<string, { input: number; read: number }> = {
+  "claude-opus-5-5": { input: 4, read: 0.2 },
+  "claude-sonnet-5-5": { input: 2, read: 0.2 },
+  "claude-haiku-4-5": { input: 1, read: 0.1 },
+};
+// LIMITS means a subscription within its plan: the 1-hour lifetime, whose cache writes cost 2× input.
+const write1h = (model = "claude-opus-5-5") => 2 * PRICE[model].input;
+const readCost = (tokens: number, model = "claude-opus-5-5") => (tokens * PRICE[model].read) / 1e6;
+const rewriteCost = (tokens: number, model = "claude-opus-5-5") => (tokens * write1h(model)) / 1e6;
+const savedBy = (read: number, model = "claude-opus-5-5") => (read * (PRICE[model].input - PRICE[model].read)) / 1e6;
+// The mod's money format, for amounts between a cent and 100 dollars.
+const en$ = (usd: number) => `$${usd.toFixed(2)}`;
+const fr$ = (usd: number) => `${usd.toFixed(2).replace(".", ",")} $`;
+
+// The cache pill's hover card in the app; null without one.
+async function boltTip(ui: any): Promise<string | null> {
+  return cardOf(ui, "cache");
+}
+
 test("cache: share read and time left on a subscription (1 hour)", async ($, on) => {
   world(on);
   withUsage(on, LIMITS);
@@ -301,12 +368,22 @@ test("cache: yellow under 10 minutes, then expired with /compact", async ($, on)
   let { ui, texts } = await band($, "terminal");
   expect(texts).toContain("5 min");
   const soon: any = await ui.find({ type: "Text", text: "5 min" });
-  expect(soon?.props?.color).toBe("yellow");
+  expect(soon?.props?.color).toBe("#a8690a");
+  // What letting it lapse costs: the 107k context written again (1 hour lifetime), dim.
+  const stake: any = await ui.find({ type: "Text", text: `· ${en$(rewriteCost(107_000))} at stake` });
+  expect(stake?.props?.dimColor).toBe(true);
+  const desktop = await band($, "desktop");
+  expect(desktop.texts).toContain(`${en$(rewriteCost(107_000))} at stake`);
+  const yellow: any = await desktop.ui.find({ type: "Text", text: "5 min" });
+  expect(yellow?.props?.color).toBe("#a8690a");
+  expect(await boltTip(desktop.ui)).toBe(
+    `The cache expires at ${at(NOW + 3_600_000)}. Send your next message before then, or it writes 107k tokens again (≈ ${en$(rewriteCost(107_000))} instead of ≈ ${en$(readCost(107_000))}).`,
+  );
   await (clock as any).advance(6 * 60_000);
   ({ ui, texts } = await band($, "terminal"));
   expect(texts).toContain("expired");
-  // 107k of context: past 100k, what gets written again and /compact before going on.
-  expect(texts).toContain("· 107k to rewrite · /compact");
+  // 107k of context: past 100k, what gets written again, its price, and /compact before going on.
+  expect(texts).toContain(`· 107k to rewrite ≈ ${en$(rewriteCost(107_000))} · /compact`);
   const expired: any = await ui.find({ type: "Text", text: "expired" });
   expect(expired?.props?.color).toBe("red");
 });
@@ -320,7 +397,14 @@ test("cache: a miss after a model change names the cause", async ($, on) => {
   await step($, MISS, "claude-sonnet-5-5");
   const { texts } = await band($, "terminal");
   expect(texts).toContain("0%");
-  expect(texts).toContain("· missed · model changed");
+  // The surcharge: 99.7k tokens written (Sonnet 5.5, 1 hour) instead of read from the cache.
+  const surcharge = (99_700 * (write1h("claude-sonnet-5-5") - PRICE["claude-sonnet-5-5"].read)) / 1e6;
+  expect(texts).toContain(`· missed · model changed · +${en$(surcharge)}`);
+  const desktop = await band($, "desktop");
+  expect(desktop.texts).toContain(`missed · model changed · +${en$(surcharge)}`);
+  expect(await boltTip(desktop.ui)).toBe(
+    `This message read only 0% from the cache (model changed): it wrote 99.7k tokens again, ≈ ${en$(surcharge)} more than a message served by the cache.`,
+  );
 });
 
 test("cache: 5 minutes on an API key (no plan window)", async ($, on) => {
@@ -377,91 +461,14 @@ test("agents: a pill while subagents run, gone once they finish", async ($, on) 
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   const desktop = await band($, "desktop");
   expect(desktop.texts).toContain("2 agents");
-  const svgs = (await desktop.ui.findAll({ type: "Svg" })) as any[];
-  const robot = svgs.find((s) => s.props?.alt === "Agents running");
-  expect(String(robot?.props?.source)).toContain("Plan · Review the diff");
-  expect(robot?.props?.isInteractive).toBe(true);
+  expect(String(await cardOf(desktop.ui, "agents"))).toContain("Plan · Review the diff");
   list = list.map((a) => ({ ...a, status: "completed" }));
   await ($ as any).turn.complete({ answer: "ok", agentId: "a1" } as any);
   const after = await band($, "terminal");
   expect(after.texts.some((t: string) => t.includes("agent"))).toBe(false);
 });
 
-// ---------- Heavy thread ----------
-
-function heavyWorld(on: any, tokens: number, stored: Record<string, unknown> = {}) {
-  world(on, {}, stored);
-  withUsage(on, LIMITS, { tokens, window: 1_000_000, percent: Math.round(tokens / 10_000) });
-}
-
-test("heavy thread: hidden under 300k", async ($, on) => {
-  heavyWorld(on, 250_000);
-  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
-  const { texts } = await band($, "terminal");
-  expect(texts).not.toContain("heavy thread");
-});
-
-for (const surface of ["terminal", "desktop"] as const) {
-  test(`heavy thread: yellow from 300k, against the measured baseline ${surface}`, async ($, on) => {
-    // Fresh sessions started at 120k and 114k: the baseline is the smallest.
-    heavyWorld(on, 342_000, { baseline: { at: NOW, list: [120_000, 114_000] } });
-    await $.session.start({ source: "resume", cwd: "/tmp" } as any);
-    const { ui, texts } = await band($, surface);
-    if (surface === "terminal") {
-      expect(texts).toContain("×3");
-      const times: any = await ui.find({ type: "Text", text: "×3" });
-      expect(times?.props?.color).toBe("yellow");
-      expect(texts).toContain("heavy thread");
-      expect(texts).toContain("· start a new thread");
-    } else {
-      // In the app: bag and figure in one interactive drawing; the words and the advice sit in its tooltip.
-      expect(texts).not.toContain("heavy thread");
-      expect(texts).not.toContain("×3");
-      const svgs = (await ui.findAll({ type: "Svg" })) as any[];
-      const pill = svgs.find((s) => s.props?.alt === "Heavy thread");
-      const source = String(pill?.props?.source);
-      expect(pill?.props?.isInteractive).toBe(true);
-      expect(source).toContain("color-scheme:light dark");
-      expect(source).toContain(">×3</text>");
-      expect(source).toContain('fill="#d9962b"');
-      expect(source).toContain(
-        "<title>Heavy thread: 342k tokens of context, 3 times your starting load (114k).\nEvery action reads the whole context again: start a new thread.</title>",
-      );
-      // 16 px high, wide enough for the bag and the figure.
-      expect(pill?.props?.height).toBe(16);
-      expect(pill?.props?.width).toBe(41);
-      expect(source).toContain('viewBox="0 0 61.5 24"');
-    }
-  });
-}
-
-test("heavy thread: red from 500k, 100k baseline until one is measured", async ($, on) => {
-  heavyWorld(on, 652_000);
-  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
-  const { ui, texts } = await band($, "terminal");
-  expect(texts).toContain("×6.5");
-  const times: any = await ui.find({ type: "Text", text: "×6.5" });
-  expect(times?.props?.color).toBe("red");
-});
-
-test("heavy thread: the app's tooltip in French", async ($, on) => {
-  world(on, { LANG: "fr_FR.UTF-8" });
-  withUsage(on, LIMITS, { tokens: 612_000, window: 1_000_000, percent: 61 });
-  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
-  const { ui } = await band($, "desktop");
-  const svgs = (await ui.findAll({ type: "Svg" })) as any[];
-  const pill = svgs.find((s) => s.props?.alt === "Fil lourd");
-  const source = String(pill?.props?.source);
-  expect(pill?.props?.isInteractive).toBe(true);
-  expect(source).toContain(">×6,1</text>");
-  // Red from 500k.
-  expect(source).toContain('fill="#d64545"');
-  expect(source).toContain(
-    "<title>Fil lourd : 612k tokens de contexte, 6,1 fois le départ d'un fil neuf (100k).\nChaque action relit tout le contexte : ouvre un nouveau fil.</title>",
-  );
-});
-
-test("desktop icons: bag, gauge and speech bubble centred at y=12", async ($, on) => {
+test("desktop icons: gauge and speech bubble centred at y=12", async ($, on) => {
   world(on);
   on("turn.complete", () => ({ text: "" }));
   const costs = [4.0, 4.84];
@@ -472,33 +479,11 @@ test("desktop icons: bag, gauge and speech bubble centred at y=12", async ($, on
   const { ui } = await band($, "desktop");
   const svgs = (await ui.findAll({ type: "Svg" })) as any[];
   const source = (alt: string) => String(svgs.find((s) => s.props?.alt === alt)?.props?.source);
-  expect(source("Heavy thread")).toContain('d="M8.6 7.5a3.4 3.4 0 1 1 6.8 0"');
-  expect(source("Heavy thread")).toContain('d="M6.2 7.5h11.6l2 10.4a1.6 1.6 0 0 1-1.6 1.9H5.8a1.6 1.6 0 0 1-1.6-1.9z"');
   expect(source("5-hour limit")).toContain('<g transform="translate(0 0.5)"><path d="M3.6 18.5');
   expect(source("Last prompt")).toContain('<g transform="translate(0 0.5)"><path d="M4 5.5');
 });
 
-test("heavy thread: a fresh session records its starting load", async ($, on) => {
-  const store = new Map<string, unknown>([["baseline", { at: NOW, list: [130_000] }]]);
-  mock.clock(on, { now: NOW });
-  mock.env(on, {});
-  on("store.get", (_$: any, e: any) => ({ value: store.get(e.key) }));
-  on("store.set", (_$: any, e: any) => (store.set(e.key, e.value), { value: undefined }));
-  on("store.delete", (_$: any, e: any) => (store.delete(e.key), { value: undefined }));
-  on("store.keys", () => ({ value: [...store.keys()] }));
-  on("session.id", () => ({ value: "session-2" }));
-  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
-  on("ui.invalidate", () => ({ value: undefined }));
-  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
-  on("turn.complete", () => ({ text: "" }));
-  let call = 0;
-  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: call++ === 0 ? 0 : 112_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS } }));
-  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
-  await ($ as any).turn.complete({ answer: "ok" } as any);
-  expect((store.get("baseline") as any).list).toEqual([130_000, 112_000]);
-});
-
-test("cache expired on a heavy thread: what gets written again, and a new thread", async ($, on) => {
+test("cache expired from 300k: what gets written again, and a new thread", async ($, on) => {
   const clock = mock.clock(on, { now: NOW });
   mock.store(on, {});
   mock.env(on, {});
@@ -512,9 +497,18 @@ test("cache expired on a heavy thread: what gets written again, and a new thread
   await step($, HIT);
   await (clock as any).advance(61 * 60_000);
   const { texts } = await band($, "terminal");
-  expect(texts).toContain("· 741k to rewrite");
-  // The way out sits once, in the heavy-thread pill.
-  expect(texts.filter((t: string) => t.includes("start a new thread")).length).toBe(1);
+  // A new thread avoids rewriting the whole context; a compaction would read it all again.
+  // The terminal has no tooltip: the advice stays on the line.
+  expect(texts).toContain(`· 741k to rewrite ≈ ${en$(rewriteCost(741_000))} · new thread`);
+  expect(texts.join(" ")).not.toContain("/compact");
+  // In the app the advice moves to the bolt's tooltip.
+  const desktop = await band($, "desktop");
+  expect(desktop.texts).toContain(`741k to rewrite ≈ ${en$(rewriteCost(741_000))}`);
+  expect(desktop.texts.join(" ")).not.toContain("new thread");
+  const tip = String(await boltTip(desktop.ui));
+  expect(tip).toContain(`The next message writes the whole context (741k) again at full price, ≈ ${en$(rewriteCost(741_000))}.`);
+  expect(tip).toContain("A new thread avoids this rewrite; a compaction would read it all again.");
+  expect(tip).not.toContain("/compact");
 });
 
 test("last prompt: its share of the 5-hour limit next to its cost", async ($, on) => {
@@ -555,13 +549,222 @@ test("cost: no cents from 100 dollars", async ($, on) => {
   expect(texts).toContain("≈ $135");
 });
 
-test("desktop: pills never shrink, and the 5-hour reset time sits in the clock's tooltip", async ($, on) => {
+test("desktop: pills never shrink, and the 5-hour reset time sits in the pill's hover card", async ($, on) => {
   world(on);
   withUsage(on, LIMITS);
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   const { ui } = await band($, "desktop");
-  const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor);
+  const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor && b.props?.position !== "absolute");
   for (const p of pills) expect(p.props?.flexShrink).toBe(0);
-  const svgs = (await ui.findAll({ type: "Svg" })) as any[];
-  expect(svgs.some((s) => s.props?.isInteractive && String(s.props?.source).includes(`Resets at ${at(NOW + 3 * 3_600_000)}`))).toBe(true);
+  expect(await cardOf(ui, "gauge-5h")).toBe(`Resets at ${at(NOW + 3 * 3_600_000)}`);
+});
+
+// ---------- Compaction ----------
+
+// A large thread whose cache expired, as the band showed it before a /compact.
+async function largeExpired($: any, on: any, compaction: Record<string, unknown>) {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, {});
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  on("turn.complete", () => ({ text: "" }));
+  on("session.compact", () => compaction);
+  withUsage(on, LIMITS, { tokens: 784_000, window: 1_000_000, percent: 78 });
+  engineStep(on, [
+    { ...HIT, cache_read_input_tokens: 780_000 },
+    // The first request after the compaction writes the whole, smaller, context.
+    { ...MISS, cache_creation_input_tokens: 47_700 },
+  ]);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await (clock as any).advance(75 * 60_000);
+  return clock;
+}
+
+test("compaction: the context drops at once, no expired cache", async ($, on) => {
+  await largeExpired($, on, { messages: [{ role: "user", text: "Summary of the thread", toolUses: [] }], tokensBefore: 784_000, tokensAfter: 48_000 });
+  const before = await band($, "terminal");
+  expect(before.texts).toContain("784k");
+  expect(before.texts).toContain("expired");
+  expect(before.texts).toContain(`· 784k to rewrite ≈ ${en$(rewriteCost(784_000))} · new thread`);
+  await ($ as any).session.compact({ trigger: "manual", messages: [{ role: "user", text: "Go on", toolUses: [] }, { role: "assistant", text: "Done", toolUses: [] }] });
+  const after = await band($, "terminal");
+  expect(after.texts).toContain("48k");
+  expect(after.texts).not.toContain("784k");
+  expect(after.texts.join(" ")).not.toContain("new thread");
+  expect(after.texts).not.toContain("expired");
+  expect(after.texts).toContain("compacted");
+  expect(await boltTip((await band($, "desktop")).ui)).toBe("Compacted: the next message writes a new, smaller cache.");
+  // The next request writes a new cache: neither a miss nor expired.
+  await step($, HIT);
+  const next = await band($, "terminal");
+  expect(next.texts).not.toContain("compacted");
+  expect(next.texts.join(" ")).not.toContain("missed");
+  expect(next.texts).toContain("1h00");
+});
+
+test("compaction: a skipped one changes nothing", async ($, on) => {
+  await largeExpired($, on, { skip: "blocked by a hook" });
+  await ($ as any).session.compact({ trigger: "manual", messages: [{ role: "user", text: "Go on", toolUses: [] }, { role: "assistant", text: "Done", toolUses: [] }] });
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("784k");
+  expect(texts).toContain("expired");
+  expect(texts).not.toContain("compacted");
+});
+
+// ---------- Cache prices ----------
+
+// A large thread: 289k of context, 287k of it read from the cache by the last message.
+const BIG = { tokens: 289_000, window: 1_000_000, percent: 29 };
+const BIG_HIT = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 287_000, cache_creation_input_tokens: 1_700, output_tokens: 500 };
+
+// Model ids as providers spell them, and the list price each one should find.
+for (const [model, family] of [
+  ["claude-opus-5-5", "claude-opus-5-5"],
+  ["claude-opus-5-5[1m]", "claude-opus-5-5"],
+  ["us.anthropic.claude-sonnet-5-5", "claude-sonnet-5-5"],
+  ["claude-haiku-4-5-20251001", "claude-haiku-4-5"],
+  ["claude-unknown-9", null],
+] as const) {
+  test(`cache price of ${model}`, async ($, on) => {
+    world(on);
+    withUsage(on, LIMITS, BIG);
+    engineStep(on, [{ ...BIG_HIT, model }]);
+    await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+    await step($, { ...BIG_HIT, model }, model);
+    const tip = String(await boltTip((await band($, "desktop")).ui));
+    if (family) {
+      expect(tip).toContain(`Reading the context: ≈ ${en$(readCost(289_000, family))} a message. If it expires: ≈ ${en$(rewriteCost(289_000, family))} to write it again.`);
+    } else {
+      // Unknown: tokens only, no price anywhere.
+      expect(tip).toContain("Last message: 99% read from the cache (287k).");
+      expect(tip).not.toContain("$");
+    }
+  });
+}
+
+test("cache tooltip, warm, French: lifetime observed, costs, savings", async ($, on) => {
+  const clock = world(on, { LANG: "fr_FR.UTF-8" });
+  withUsage(on, LIMITS, BIG);
+  engineStep(on, [BIG_HIT, BIG_HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, BIG_HIT);
+  // A hit 6 minutes later proves the 1-hour lifetime.
+  await clock.advance(6 * 60_000);
+  await step($, BIG_HIT);
+  const { ui, texts } = await band($, "desktop");
+  // The pill itself is unchanged: the time left alone.
+  expect(texts).toContain("1h00");
+  expect(texts.join(" ")).not.toContain("$");
+  expect(await boltTip(ui)).toBe(
+    [
+      `Cache chaud jusqu'à ${at(NOW + 6 * 60_000 + 3_600_000)} (durée 1 h constatée).`,
+      // 287k read out of a 289.3k prompt.
+      "Dernier message : 99 % lu depuis le cache (287k).",
+      `Relire le contexte : ≈ ${fr$(readCost(289_000))} par message. S'il expire : ≈ ${fr$(rewriteCost(289_000))} pour le réécrire.`,
+      // Two hits of 287k each, at the input price minus the cache-read price.
+      `Ce fil : ≈ ${fr$(2 * savedBy(287_000))} économisés grâce au cache.`,
+    ].join("\n"),
+  );
+});
+
+test("cache tooltip, warm, English: lifetime assumed", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS, BIG);
+  engineStep(on, [BIG_HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, BIG_HIT);
+  await step($, BIG_HIT);
+  expect(await boltTip((await band($, "desktop")).ui)).toBe(
+    [
+      `Cache warm until ${at(NOW + 3_600_000)} (1-hour lifetime, assumed).`,
+      "Last message: 99% read from the cache (287k).",
+      `Reading the context: ≈ ${en$(readCost(289_000))} a message. If it expires: ≈ ${en$(rewriteCost(289_000))} to write it again.`,
+      `This thread: ≈ ${en$(2 * savedBy(287_000))} saved by the cache.`,
+    ].join("\n"),
+  );
+});
+
+test("cache: under 10 minutes and under 90% served, the stake after the time", async ($, on) => {
+  const clock = world(on);
+  withUsage(on, LIMITS);
+  const PART = { ...HIT, cache_read_input_tokens: 72_000, cache_creation_input_tokens: 0, input_tokens: 28_000 };
+  engineStep(on, [PART]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, PART);
+  await clock.advance(55 * 60_000);
+  const { ui, texts } = await band($, "terminal");
+  expect(texts).toContain("72%");
+  const time: any = await ui.find({ type: "Text", text: "· 5 min" });
+  expect(time?.props?.color).toBe("#a8690a");
+  expect(texts).toContain(`· ${en$(rewriteCost(107_000))} at stake`);
+  expect(texts.indexOf("· 5 min")).toBeLessThan(texts.indexOf(`· ${en$(rewriteCost(107_000))} at stake`));
+});
+
+test("cache expired at 150k: the price in the pill, /compact in the tooltip", async ($, on) => {
+  const clock = world(on);
+  withUsage(on, LIMITS, { tokens: 150_000, window: 1_000_000, percent: 15 });
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await clock.advance(61 * 60_000);
+  const desktop = await band($, "desktop");
+  expect(desktop.texts).toContain(`150k to rewrite ≈ ${en$(rewriteCost(150_000))}`);
+  expect(desktop.texts.join(" ")).not.toContain("/compact");
+  expect(await boltTip(desktop.ui)).toBe(
+    `The next message writes the whole context (150k) again at full price, ≈ ${en$(rewriteCost(150_000))}.\n/compact before going on: the context written again will be smaller.`,
+  );
+  // The terminal, without a tooltip, keeps the advice on the line.
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain(`· 150k to rewrite ≈ ${en$(rewriteCost(150_000))} · /compact`);
+});
+
+test("cache: an unknown model shows tokens, never dollars", async ($, on) => {
+  const clock = world(on);
+  withUsage(on, LIMITS);
+  const OTHER = { ...HIT, model: "claude-unknown-9" };
+  engineStep(on, [OTHER]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, OTHER, "claude-unknown-9");
+  await clock.advance(55 * 60_000);
+  let desktop = await band($, "desktop");
+  expect(desktop.texts).toContain("107k at stake");
+  expect(desktop.texts.join(" ")).not.toContain("$");
+  expect(await boltTip(desktop.ui)).toBe(`The cache expires at ${at(NOW + 3_600_000)}. Send your next message before then, or it writes 107k tokens again.`);
+  await clock.advance(6 * 60_000);
+  desktop = await band($, "desktop");
+  expect(desktop.texts).toContain("107k to rewrite");
+  expect(desktop.texts.join(" ")).not.toContain("$");
+  expect(String(await boltTip(desktop.ui))).not.toContain("$");
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("· 107k to rewrite · /compact");
+});
+
+test("cache savings: kept in the store, back on a resumed session", async ($, on) => {
+  mock.clock(on, { now: NOW });
+  mock.env(on, {});
+  const store = new Map<string, unknown>();
+  on("store.get", (_$: any, e: any) => ({ value: store.get(e.key) }));
+  on("store.set", (_$: any, e: any) => (store.set(e.key, e.value), { value: undefined }));
+  on("store.delete", (_$: any, e: any) => (store.delete(e.key), { value: undefined }));
+  on("store.keys", () => ({ value: [...store.keys()] }));
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  on("turn.complete", () => ({ text: "" }));
+  withUsage(on, LIMITS, BIG);
+  engineStep(on, [BIG_HIT]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, BIG_HIT);
+  await step($, BIG_HIT);
+  await ($ as any).turn.complete({ answer: "ok" } as any);
+  const saved = (store.get("turns:session-1") as any)?.saved;
+  expect(Math.abs(saved - 2 * savedBy(287_000))).toBeLessThan(1e-9);
+  // Restarted: the figure comes back from the store, not from new requests.
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  expect(String(await boltTip((await band($, "desktop")).ui))).toContain(`This thread: ≈ ${en$(2 * savedBy(287_000))} saved by the cache.`);
 });

@@ -1,6 +1,6 @@
 // Token Weather Usage: one line above the prompt.
 //   Terminal, blocks split by a thin rule:
-//   ☁ 440k ▃▄▂▇▆ ▲ +8.4k │ 5h ━━╍╍── 37% · 2h22 │ 7d ━━━╍── 60% · 2d23h │ cache 52 min │ ≈ $4.32 (+$0.84 · +2% 5h) │ heavy thread ×4.4 · start a new thread │ 2 agents
+//   ☁ 440k ▃▄▂▇▆ ▲ +8.4k │ 5h ━━╍╍── 37% · 2h22 │ 7d ━━━╍── 60% · 2d23h │ cache 52 min │ ≈ $4.32 (+$0.84 · +2% 5h) │ 2 agents
 //   Desktop app: the same blocks as tinted, outlined pills.
 //
 // Weather, context and recent turns: adapted from the Token Weather example,
@@ -29,21 +29,36 @@ const TEXT = {
     gaugeAlt: (label, value) => `${label}: ${value} used`,
     cache: "cache",
     expired: "expired",
+    compacted: "compacted",
     missed: "missed",
     causes: { model: "model changed", lapsed: "lapsed", prefix: "start changed" },
     underMinute: "< 1 min",
     cost: (usd) => (usd >= 100 ? `≈ $${Math.round(usd)}` : `≈ $${usd.toFixed(2)}`),
     resetsAt: (time) => `Resets at ${time}`,
-    heavyTip: (ratio, tokens, baseline) =>
-      `Heavy thread: ${tokens} tokens of context, ${decimal(ratio)} times your starting load (${baseline}).\nEvery action reads the whole context again: start a new thread.`,
     lastPrompt: (usd) => `+$${usd.toFixed(2)}`,
     lastPrompt5h: (points) => `+${decimal(points)}% 5h`,
-    heavy: "heavy thread",
-    times: (x) => `×${decimal(x)}`,
-    fresh: "start a new thread",
     toRewrite: (tokens) => `${tokens} to rewrite`,
+    newThread: "new thread",
+    // $2.32, $182 from 100 dollars, < $0.01 under a cent.
+    money: (usd) => (usd < 0.01 ? "< $0.01" : `$${amount(usd)}`),
+    atStake: (what) => `${what} at stake`,
+    // The cache's tooltip in the app, one line per item.
+    tips: {
+      warm: (time, oneHour, observed) => `Cache warm until ${time} (${oneHour ? "1-hour" : "5-minute"} lifetime, ${observed ? "observed" : "assumed"}).`,
+      lastRead: (share, tokens) => `Last message: ${share} read from the cache (${tokens}).`,
+      costs: (read, rewrite) => `Reading the context: ${read} a message. If it expires: ${rewrite} to write it again.`,
+      saved: (usd) => `This thread: ${usd} saved by the cache.`,
+      soon: (time, tokens, costs) =>
+        `The cache expires at ${time}. Send your next message before then, or it writes ${tokens} tokens again${costs ? ` (${costs.rewrite} instead of ${costs.read})` : ""}.`,
+      expired: (tokens, cost) => `The next message writes the whole context (${tokens}) again at full price${cost ? `, ${cost}` : ""}.`,
+      compact: "/compact before going on: the context written again will be smaller.",
+      newThread: "A new thread avoids this rewrite; a compaction would read it all again.",
+      missed: (share, cause, tokens, surcharge) =>
+        `This message read only ${share} from the cache (${cause}): it wrote ${tokens} tokens again${surcharge ? `, ${surcharge} more than a message served by the cache` : ""}.`,
+      compacted: "Compacted: the next message writes a new, smaller cache.",
+    },
     agents: (n) => (n === 1 ? "1 agent" : `${n} agents`),
-    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents running", heavy: "Heavy thread" },
+    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents running" },
   },
   fr: {
     weather: { clear: "Clair", cloudy: "Nuageux", showers: "Averses", storm: "Orage", compact: "Compacter bientôt" },
@@ -55,24 +70,47 @@ const TEXT = {
     gaugeAlt: (label, value) => `${label} : ${value} consommés`,
     cache: "cache",
     expired: "expiré",
+    compacted: "compacté",
     missed: "raté",
     causes: { model: "modèle changé", lapsed: "délai dépassé", prefix: "début modifié" },
     underMinute: "< 1 min",
     cost: (usd) => (usd >= 100 ? `≈ ${Math.round(usd)} $` : `≈ ${usd.toFixed(2).replace(".", ",")} $`),
     resetsAt: (time) => `Remise à zéro à ${time}`,
-    heavyTip: (ratio, tokens, baseline) =>
-      `Fil lourd : ${tokens} tokens de contexte, ${decimal(ratio).replace(".", ",")} fois le départ d'un fil neuf (${baseline}).\nChaque action relit tout le contexte : ouvre un nouveau fil.`,
     lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
     lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")} % 5h`,
-    heavy: "fil lourd",
-    times: (x) => `×${decimal(x).replace(".", ",")}`,
-    fresh: "nouveau fil",
     toRewrite: (tokens) => `${tokens} à réécrire`,
+    newThread: "nouveau fil",
+    money: (usd) => (usd < 0.01 ? "< 0,01 $" : `${amount(usd).replace(".", ",")} $`),
+    atStake: (what) => `${what} en jeu`,
+    tips: {
+      warm: (time, oneHour, observed) => `Cache chaud jusqu'à ${time} (durée ${oneHour ? "1 h" : "5 min"} ${observed ? "constatée" : "supposée"}).`,
+      lastRead: (share, tokens) => `Dernier message : ${share} lu depuis le cache (${tokens}).`,
+      costs: (read, rewrite) => `Relire le contexte : ${read} par message. S'il expire : ${rewrite} pour le réécrire.`,
+      saved: (usd) => `Ce fil : ${usd} économisés grâce au cache.`,
+      soon: (time, tokens, costs) =>
+        `Le cache expire à ${time}. Envoie ton prochain message avant, sinon il réécrira ${tokens} tokens${costs ? ` (${costs.rewrite} au lieu de ${costs.read})` : ""}.`,
+      expired: (tokens, cost) => `Le prochain message réécrira tout le contexte (${tokens}) au prix fort${cost ? `, ${cost}` : ""}.`,
+      compact: "/compact avant de reprendre : le contexte réécrit sera plus petit.",
+      newThread: "Un nouveau fil évite cette réécriture ; une compaction relirait tout.",
+      missed: (share, cause, tokens, surcharge) =>
+        `Ce message n'a lu que ${share} depuis le cache (${cause}) : il a réécrit ${tokens} tokens${surcharge ? `, ${surcharge} de plus qu'un message servi par le cache` : ""}.`,
+      compacted: "Compacté : le prochain message écrira un cache neuf, plus petit.",
+    },
     agents: (n) => (n === 1 ? "1 agent" : `${n} agents`),
-    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents en cours", heavy: "Fil lourd" },
+    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents en cours" },
   },
 };
 let T = TEXT.en;
+
+// 2.32, or 182 from 100 dollars (cents dropped).
+function amount(usd) {
+  return Math.round(usd * 100) >= 10_000 ? String(Math.round(usd)) : usd.toFixed(2);
+}
+
+// "≈ $2.32"; under a cent, "< $0.01" alone.
+function approx(usd) {
+  return usd < 0.01 ? T.money(usd) : `≈ ${T.money(usd)}`;
+}
 
 // ---------- Context weather (Token Weather) ----------
 
@@ -110,15 +148,34 @@ const WEATHER_ICONS = {
 };
 const WEATHER_ICON_COLORS = { clear: "#e0b000", cloudy: "#8ea3b8", showers: "#2f68c0", storm: "#b04fc0", compact: "#d64545" };
 
-// An interactive Svg (for its tooltip) is drawn in a frame of its own: without a color scheme
-// matching the app's, the browser paints that frame white in dark mode.
-const FRAME_SCHEME = "<style>:root{color-scheme:light dark}</style>";
+// Hover cards: the app shows no SVG <title> tooltip, so each pill carries a card of its own,
+// hidden until the pointer is over the pill, drawn above the band, in the app theme's own
+// background and outline colors (tested in the app against a fixed dark card: this one reads better).
+const CARD = { back: "background", line: "subtle" };
+function hoverCard(Box, Text, tip) {
+  const lines = String(tip).split("\n");
+  // No key: a keyed Box would scope its own hover, and a hidden one is never hovered.
+  return Box({
+    position: "absolute",
+    bottom: 1,
+    left: 0,
+    display: "none",
+    hover: { display: "flex" },
+    flexDirection: "column",
+    paddingX: 1,
+    paddingY: 0,
+    borderStyle: "round",
+    borderColor: CARD.line,
+    backgroundColor: CARD.back,
+    children: lines.map((line, i) => Text({ key: "t" + i, children: line })),
+  });
+}
 
-// The weather word lives in the icon's tooltip: the pill keeps the tokens alone.
-function weatherSvg(id, title) {
+// The weather word goes to the pill's hover card: the pill keeps the tokens alone.
+function weatherSvg(id) {
   const draw = WEATHER_ICONS[id];
   if (!draw) return null;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>${draw(WEATHER_ICON_COLORS[id])}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WEATHER_ICON_SIZE}" height="${WEATHER_ICON_SIZE}" viewBox="0 0 24 24">${draw(WEATHER_ICON_COLORS[id])}</svg>`;
 }
 
 // Context readings: { tokens, window, percent }, oldest first.
@@ -159,6 +216,9 @@ const TTL = { "5m": 5 * MINUTE, "1h": HOUR };
 const CACHE_SOON = 10 * MINUTE;
 // From this context size, an expired cache suggests /compact before going on.
 const COMPACT_AT = 100_000;
+// From this one, a new thread instead: after a pause the next message writes the whole context
+// again at full price; a new thread avoids that rewrite, a compaction would read it all again.
+const LARGE_CONTEXT = 300_000;
 // A request that read less than half its prompt from the cache, and wrote more than this, missed.
 const MISS_SHARE = 50;
 const MISS_WRITE = 1_000;
@@ -166,8 +226,32 @@ const MISS_WRITE = 1_000;
 const GOOD_HIT = 90;
 // Last main-loop request: { at, model, read, write, fresh, cause }.
 let cache = null;
+// True from a compaction of the main conversation until its next request: the cache that
+// request writes is a new one, neither expired nor missed.
+let compacted = false;
 // Lifetime seen in the traffic ("5m" | "1h"), which beats the rules.
 let seenTtl = null;
+// What the cache saved this session, in dollars: each request's tokens read from the cache,
+// at the input price minus the cache-read price.
+let savedUsd = 0;
+
+// Anthropic first-party list prices, USD per million tokens, as of 2026-09-25: input and cache
+// read. Cache writes follow from input: 1.25× for the 5-minute lifetime, 2× for 1 hour.
+// Update this table, and its date, when the prices change. A model missing here shows tokens only.
+const PRICES = {
+  "claude-fable-5-1": { input: 10, read: 0.25 },
+  "claude-mythos-5-1": { input: 10, read: 0.25 },
+  "claude-fable-5": { input: 10, read: 1 },
+  "claude-opus-5-5": { input: 4, read: 0.2 },
+  "claude-opus-5": { input: 5, read: 0.5 },
+  "claude-opus-4-8": { input: 5, read: 0.5 },
+  "claude-opus-4-7": { input: 5, read: 0.5 },
+  "claude-opus-4-6": { input: 5, read: 0.5 },
+  "claude-sonnet-5-5": { input: 2, read: 0.2 },
+  "claude-sonnet-5": { input: 2, read: 0.2 },
+  "claude-sonnet-4-6": { input: 3, read: 0.3 },
+  "claude-haiku-4-5": { input: 1, read: 0.1 },
+};
 // Environment switches read at session start.
 let cacheEnv = {};
 let cacheTicker = null;
@@ -183,21 +267,6 @@ let promptBase = null;
 let lastPrompt5h = null;
 let promptBase5h = null;
 
-// ---------- Heavy thread ----------
-
-// Every request reads the whole context again: past 300k tokens a thread costs several times a
-// fresh one for each action, and starting a new thread is the main saving. Red past 500k.
-const HEAVY = 300_000;
-const VERY_HEAVY = 500_000;
-// What a fresh thread starts with (tools, connectors, skills, instructions): the smallest first
-// reading of the last fresh sessions, kept across sessions; 100k until one is measured.
-const BASELINE_KEY = "baseline";
-const BASELINE_KEEP = 8;
-const DEFAULT_BASELINE = 100_000;
-let baseline = DEFAULT_BASELINE;
-// True from the start of a new conversation until its first real context reading.
-let fresh = false;
-
 // Subagents running now: { id, description, type }.
 let agents = [];
 let agentsKey = "";
@@ -209,7 +278,8 @@ const TEXT_CELLS = 6;
 const GAUGE = { width: 54, height: 9 };
 const TONES = {
   calm: { svg: "#3fa66b", text: "green" },
-  fast: { svg: "#d9962b", text: "yellow" },
+  // The theme's "yellow" is bright yellow in the app, unreadable on the yellow pill: a deep amber.
+  fast: { svg: "#d9962b", text: "#a8690a" },
   alert: { svg: "#d64545", text: "red" },
 };
 const TRACK = "rgba(127,127,127,0.2)";
@@ -250,9 +320,6 @@ const ICONS = {
   agents: (c) =>
     `<rect x="4" y="7.5" width="16" height="12.5" rx="3.5" fill="${c}" fill-opacity="0.14" stroke="${c}" stroke-width="2"/><path d="M12 7.5V4M2 12.5v3M22 12.5v3" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="3.2" r="1.3" fill="${c}"/><circle cx="9" cy="13" r="1.5" fill="${c}"/><circle cx="15" cy="13" r="1.5" fill="${c}"/><path d="M9.5 16.8h5" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round"/>`,
 };
-// A weight (a bag with a handle): the heavy thread, centred at y=12.
-ICONS.heavy = (c) =>
-  `<path d="M8.6 7.5a3.4 3.4 0 1 1 6.8 0" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><path d="M6.2 7.5h11.6l2 10.4a1.6 1.6 0 0 1-1.6 1.9H5.8a1.6 1.6 0 0 1-1.6-1.9z" fill="${c}" fill-opacity="0.16" stroke="${c}" stroke-width="2" stroke-linejoin="round"/>`;
 // Icon color per block: deeper than the pill's tint, readable on light and dark backgrounds.
 const ICON_COLORS = { five_hour: "#3a9a62", seven_day: "#8a5fd0", spend_limit: "#b8892a", calm: "#1b9cbe", fast: "#d9962b", alert: "#d64545", cost: "#b8892a", agents: "#c4507f" };
 const LIMIT_ICONS = { five_hour: "gauge", seven_day: "calendar", spend_limit: "coin" };
@@ -269,16 +336,15 @@ export function register(on, options) {
     readings = [];
     limits = { at: 0, list: [] };
     cache = null;
+    compacted = false;
     seenTtl = null;
+    savedUsd = 0;
     lastPrompt = null;
     lastPrompt5h = null;
     cacheKey = "";
     cacheEnv = await cacheEnvOf($);
     turnsKey = TURNS_PREFIX + (await $.session.id());
     await restoreTurns($);
-    baseline = await baselineOf($);
-    // A new conversation (not a resumed one): its first reading measures the starting load.
-    fresh = (e.source === "startup" || e.source === "clear") && !readings.some((r) => r.tokens > 0);
     const usage = await $.session.usage();
     pushReading(usage.context);
     cost = usage.cost?.usd ?? null;
@@ -325,7 +391,7 @@ export function register(on, options) {
     const at = await $.clock.now();
     const result = yield* next(e);
     if (result?.usage) {
-      recordRequest(at, result.usage);
+      recordRequest(at, result.usage, e.model);
       // The request may have started an agent.
       await refreshAgents($);
       $.ui.invalidate("ui.render");
@@ -344,10 +410,6 @@ export function register(on, options) {
     try {
       const usage = await $.session.usage();
       pushReading(usage.context);
-      if (fresh && readings.some((r) => r.tokens > 0)) {
-        fresh = false;
-        await recordBaseline($, readings[readings.length - 1].tokens);
-      }
       if (usage.cost) {
         cost = usage.cost.usd;
         if (promptBase !== null && cost >= promptBase) lastPrompt = cost - promptBase;
@@ -363,6 +425,28 @@ export function register(on, options) {
       $.ui.invalidate("ui.render");
     } catch {
       // No reading this turn: the line keeps the previous one.
+    }
+    return result;
+  });
+
+  // A compaction of the main conversation: the context drops now, not at the end of the next
+  // prompt. Its size comes from the compaction's result (or, missing, the live figures); the
+  // next request writes a new cache, which is neither expired nor a miss.
+  on("session.compact", async ($, e, next) => {
+    const result = await next(e);
+    if (e.agentId || e.trigger === "precompute" || !result || typeof result.skip === "string") return result;
+    try {
+      const last = readings[readings.length - 1];
+      if (Number.isFinite(result.tokensAfter) && result.tokensAfter > 0 && last?.window > 0) {
+        pushReading({ tokens: result.tokensAfter, window: last.window });
+      } else {
+        pushReading((await $.session.usage()).context);
+      }
+      compacted = true;
+      await saveTurns($);
+      $.ui.invalidate("ui.render");
+    } catch {
+      // No reading: the line catches up at the end of the next prompt.
     }
     return result;
   });
@@ -417,7 +501,9 @@ async function restoreTurns($) {
       if (key === turnsKey && saved && Array.isArray(saved.readings)) {
         readings = saved.readings.filter((r) => r && r.window > 0).slice(-HISTORY);
         if (saved.cache && Number.isFinite(saved.cache.at)) cache = saved.cache;
+        compacted = saved.compacted === true;
         if (saved.seenTtl === "5m" || saved.seenTtl === "1h") seenTtl = saved.seenTtl;
+        if (Number.isFinite(saved.saved) && saved.saved >= 0) savedUsd = saved.saved;
         if (Number.isFinite(saved.lastPrompt)) lastPrompt = saved.lastPrompt;
         if (Number.isFinite(saved.lastPrompt5h)) lastPrompt5h = saved.lastPrompt5h;
       } else if (!saved || !(now - saved.at < TURNS_KEEP_MS)) await $.store.delete(key);
@@ -430,47 +516,10 @@ async function restoreTurns($) {
 async function saveTurns($) {
   if (!turnsKey) return;
   try {
-    await $.store.set(turnsKey, { at: await $.clock.now(), readings, cache, seenTtl, lastPrompt, lastPrompt5h });
+    await $.store.set(turnsKey, { at: await $.clock.now(), readings, cache, compacted, seenTtl, saved: savedUsd, lastPrompt, lastPrompt5h });
   } catch {
     // Not saved this turn: the bars come back on the next one.
   }
-}
-
-// ---------- Heavy thread: the starting load ----------
-
-async function baselineOf($) {
-  try {
-    const saved = await $.store.get(BASELINE_KEY);
-    const values = Array.isArray(saved?.list) ? saved.list.filter((v) => Number.isFinite(v) && v > 0) : [];
-    return values.length > 0 ? Math.min(...values) : DEFAULT_BASELINE;
-  } catch {
-    return DEFAULT_BASELINE;
-  }
-}
-
-async function recordBaseline($, tokens) {
-  try {
-    const saved = await $.store.get(BASELINE_KEY);
-    const list = [...(Array.isArray(saved?.list) ? saved.list : []), tokens].slice(-BASELINE_KEEP);
-    await $.store.set(BASELINE_KEY, { at: await $.clock.now(), list });
-    baseline = Math.min(...list);
-  } catch {
-    // Not kept: the next fresh session measures it again.
-  }
-}
-
-// What the heavy-thread pill shows: { tone, ratio, times, tokens, baseline }, the last two
-// shortened (605k, 112k); null under 300k tokens.
-function heavyState() {
-  if (readings.length === 0) return null;
-  const tokens = readings[readings.length - 1].tokens;
-  if (tokens < HEAVY) return null;
-  const ratio = tokens / baseline;
-  return { tone: tokens >= VERY_HEAVY ? "alert" : "fast", ratio, times: T.times(ratio), tokens: short(tokens), baseline: short(baseline) };
-}
-
-function heavyText(state) {
-  return state ? `${T.heavy} ${state.times} · ${T.fresh}` : "";
 }
 
 // ---------- Limits: shared reading ----------
@@ -587,18 +636,23 @@ function hitOf(r) {
   return total > 0 ? Math.round(((r.read ?? 0) / total) * 100) : 0;
 }
 
-// Notes a main-loop request, names the cause when it missed the cache, and learns the lifetime.
-function recordRequest(at, usage) {
+// Notes a main-loop request, names the cause when it missed the cache, learns the lifetime, and
+// adds what the tokens read from the cache saved. The model comes from the usage, else the request.
+function recordRequest(at, usage, model) {
   const cur = {
     at,
-    model: usage.model ?? "",
+    model: usage.model || model || "",
     read: usage.cache_read_input_tokens ?? 0,
     write: usage.cache_creation_input_tokens ?? 0,
     fresh: usage.input_tokens ?? 0,
     cause: null,
   };
   const prev = cache;
-  if (prev) {
+  const afterCompact = compacted;
+  compacted = false;
+  // After a compaction the request writes a new cache: read nothing, yet nothing missed.
+  if (afterCompact) cur.rebuilt = true;
+  if (prev && !afterCompact) {
     const gap = at - prev.at;
     const missed = hitOf(cur) < MISS_SHARE && cur.write > MISS_WRITE;
     // A hit more than 5 minutes after the previous request proves the 1-hour lifetime;
@@ -607,7 +661,23 @@ function recordRequest(at, usage) {
     else if (missed && gap > TTL["5m"] && gap < TTL["1h"] && cur.model === prev.model && promptOf(cur) >= promptOf(prev)) seenTtl = "5m";
     if (missed) cur.cause = cur.model !== prev.model ? "model" : gap >= ttlMs() ? "lapsed" : "prefix";
   }
+  const price = priceOf(cur.model);
+  if (price) savedUsd += (cur.read * (price.input - price.read)) / 1e6;
   cache = cur;
+}
+
+// List prices of a model id: lowercase, without a "[1m]"-style suffix, a trailing date or a
+// provider prefix ("anthropic.", "us.anthropic.", ".../"); null when the table lacks it.
+function priceOf(model) {
+  let id = String(model ?? "").trim().toLowerCase();
+  id = id.replace(/\[[^\]]*\]$/, "").replace(/-20\d{6}$/, "");
+  id = id.slice(Math.max(id.lastIndexOf("."), id.lastIndexOf("/")) + 1);
+  return Object.prototype.hasOwnProperty.call(PRICES, id) ? PRICES[id] : null;
+}
+
+// Price of a cache write, per million tokens, for the lifetime in use.
+function writePrice(price, ttl) {
+  return (ttl === TTL["1h"] ? 2 : 1.25) * price.input;
 }
 
 // Claude Code's rules for the main conversation, after what the traffic showed.
@@ -621,25 +691,59 @@ function ttlMs() {
   return plan.length > 0 && plan.every((l) => l.percentUsed < 100) ? TTL["1h"] : TTL["5m"];
 }
 
-// What the cache block shows: { tone, value, detail, urgent }; null when caching is off.
+// What the cache block shows: { tone, value, detail, urgent, stake, advice, tip }; null when
+// caching is off. detail follows the value (in yellow when urgent), stake comes after it, dim;
+// advice is for the terminal only (the app puts it in tip, the bolt's tooltip).
 function cacheState(now) {
   if (cacheEnv.off) return null;
+  if (compacted) return { tone: "none", value: T.compacted, detail: "", tip: T.tips.compacted };
   if (!cache) return { tone: "none", value: "—", detail: "" };
   const left = cache.at + ttlMs() - now;
   const tokens = readings.length > 0 ? readings[readings.length - 1].tokens : promptOf(cache);
-  // Expired: say what the next message writes again, and the way out. On a heavy thread the
-  // heavy-thread pill already advises a new one.
+  const ttl = ttlMs();
+  // In dollars, at list prices, for the context the next message reads: from the cache, and
+  // written again once it lapsed. Null for a model missing from PRICES: tokens only.
+  const price = priceOf(cache.model);
+  const costs = price ? { read: (tokens * price.read) / 1e6, rewrite: (tokens * writePrice(price, ttl)) / 1e6 } : null;
+  // Expired: say what the next message writes again, and the way out: from 300k a new thread
+  // (it avoids rewriting the whole context at full price), from 100k /compact. In the app the
+  // way out goes to the tooltip; the terminal, without one, keeps it on the line.
   if (left <= 0) {
-    const detail = tokens >= HEAVY ? T.toRewrite(short(tokens)) : tokens >= COMPACT_AT ? `${T.toRewrite(short(tokens))} · /compact` : "";
-    return { tone: "alert", value: T.expired, detail };
+    const rewrite = T.toRewrite(short(tokens));
+    const detail = tokens < COMPACT_AT ? "" : costs ? `${rewrite} ${approx(costs.rewrite)}` : rewrite;
+    const advice = tokens >= LARGE_CONTEXT ? T.newThread : tokens >= COMPACT_AT ? "/compact" : "";
+    const tip = [T.tips.expired(short(tokens), costs && approx(costs.rewrite))];
+    if (tokens >= LARGE_CONTEXT) tip.push(T.tips.newThread);
+    else if (tokens >= COMPACT_AT) tip.push(T.tips.compact);
+    return { tone: "alert", value: T.expired, detail, advice, tip: tip.join("\n") };
   }
   const share = hitOf(cache);
-  if (cache.cause) return { tone: "fast", value: T.percent(share), detail: `${T.missed} · ${T.causes[cache.cause]}` };
+  // A miss: what writing the cache again cost above a message served by it.
+  if (cache.cause) {
+    const cause = T.causes[cache.cause];
+    const surcharge = price ? ((cache.write ?? 0) * (writePrice(price, ttl) - price.read)) / 1e6 : null;
+    const extra = surcharge !== null && surcharge >= 0.01 ? ` · +${T.money(surcharge)}` : "";
+    const tip = T.tips.missed(T.percent(share), cause, short(cache.write ?? 0), surcharge !== null && approx(surcharge));
+    return { tone: "fast", value: T.percent(share), detail: `${T.missed} · ${cause}${extra}`, tip };
+  }
   const time = left < MINUTE ? T.underMinute : duration(left);
   const soon = left < CACHE_SOON;
-  // A cache that served the message (90% or more) shows its time alone; below, the share first.
-  if (share >= GOOD_HIT) return { tone: soon ? "fast" : "calm", value: time, detail: "", urgent: soon };
-  return { tone: soon ? "fast" : "calm", value: T.percent(share), detail: time, urgent: soon };
+  const expiry = clockTime(cache.at + ttl);
+  // A cache that served the message (90% or more), or one just rebuilt after a compaction,
+  // shows its time alone; below, the share first.
+  const shown = share >= GOOD_HIT || cache.rebuilt ? { value: time, detail: "" } : { value: T.percent(share), detail: time };
+  // Under 10 minutes: what letting it lapse would cost.
+  if (soon) {
+    const stake = T.atStake(costs ? T.money(costs.rewrite) : short(tokens));
+    const tip = T.tips.soon(expiry, short(tokens), costs && { read: approx(costs.read), rewrite: approx(costs.rewrite) });
+    return { tone: "fast", ...shown, urgent: true, stake, tip };
+  }
+  const tip = [T.tips.warm(expiry, ttl === TTL["1h"], seenTtl !== null), T.tips.lastRead(T.percent(share), short(cache.read ?? 0))];
+  if (costs) {
+    tip.push(T.tips.costs(approx(costs.read), approx(costs.rewrite)));
+    if (savedUsd >= 0.01) tip.push(T.tips.saved(approx(savedUsd)));
+  }
+  return { tone: "calm", ...shown, urgent: false, tip: tip.join("\n") };
 }
 
 // ---------- Agents ----------
@@ -660,8 +764,9 @@ async function refreshAgents($) {
   return true;
 }
 
+// The cache block as the terminal writes it: "cache 8 min · $2.32 at stake".
 function cacheText(state) {
-  return state ? `${T.cache} ${state.value}${state.detail ? ` · ${state.detail}` : ""}` : "";
+  return state ? [`${T.cache} ${state.value}`, state.detail, state.stake, state.advice].filter(Boolean).join(" · ") : "";
 }
 
 // ---------- Blocks ----------
@@ -669,33 +774,6 @@ function cacheText(state) {
 function icon(Svg, key, name, color, alt, size = ICON_SIZE) {
   const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">${ICONS[name](color)}</svg>`;
   return Svg({ key, source, alt, width: size, height: size });
-}
-
-// The same, with a tooltip: an interactive drawing, in a frame of its own.
-function tipIcon(Svg, key, name, color, alt, title, size = ICON_SIZE) {
-  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>${ICONS[name](color)}</svg>`;
-  return Svg({ key, source, alt, width: size, height: size, isInteractive: true });
-}
-
-// Heavy thread in the app: the bag and "×5.4" in one interactive drawing, so the tooltip covers
-// the whole pill (a Text cannot carry one). 16 px high; the width follows the figure, from the
-// advance of each character at font size 20 in grid units (24 per 16 px).
-const HEAVY_FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif";
-// Advances measured on SF Pro at weight 650: digits 12.5, "×" 14.5, separators 5.5.
-const HEAVY_ADVANCE = { "×": 14.5, ",": 5.5, ".": 5.5 };
-// Where the figure starts: the bag (24) and the same gap as between an icon and its text.
-const HEAVY_TEXT_X = 31;
-function heavySvg(Svg, heavy) {
-  const figure = heavy.times;
-  const units = HEAVY_TEXT_X + [...figure].reduce((sum, c) => sum + (HEAVY_ADVANCE[c] ?? 12.5), 0) + 3;
-  const width = Math.ceil((units * ICON_SIZE) / 24);
-  const title = T.heavyTip(heavy.ratio, heavy.tokens, heavy.baseline);
-  // The text takes the tone's drawing color: a Text's "yellow" is a theme color, an SVG's is pure yellow.
-  const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ICON_SIZE}" viewBox="0 0 ${(width * 24) / ICON_SIZE} 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>` +
-    `${ICONS.heavy(ICON_COLORS[heavy.tone])}` +
-    `<text x="${HEAVY_TEXT_X}" y="19" font-size="20" font-weight="650" font-family="${HEAVY_FONT}" style="font-variant-numeric:tabular-nums" fill="${TONES[heavy.tone].svg}">${escapeXml(figure)}</text></svg>`;
-  return Svg({ key: "i", source, alt: T.icons.heavy, width, height: ICON_SIZE, isInteractive: true });
 }
 
 function divider(Text, key) {
@@ -713,17 +791,18 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
   parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
   // Terminal too narrow: the detail goes with the bar, leaving the label and the percentage.
   if (g.when && mode === "svg") {
-    const clock = g.resetAt ? tipIcon(Svg, "i", "clock", color, T.icons.reset, T.resetsAt(g.resetAt), SMALL_ICON) : icon(Svg, "i", "clock", color, T.icons.reset, SMALL_ICON);
-    parts.push(divider(Text, "s"), clock, Text({ key: "d", dimColor: true, children: g.when }));
+    parts.push(divider(Text, "s"), icon(Svg, "i", "clock", color, T.icons.reset, SMALL_ICON), Text({ key: "d", dimColor: true, children: g.when }));
   }
   else if (g.when && mode === "text") parts.push(Text({ key: "d", dimColor: true, children: `· ${g.when}` }));
-  return { key: "gauge-" + g.label, tint: TINTS[g.kind] ?? TINTS.spend_limit, parts };
+  // The 5-hour reset time goes to the hover card.
+  return { key: "gauge-" + g.label, tint: TINTS[g.kind] ?? TINTS.spend_limit, parts, tip: g.resetAt ? T.resetsAt(g.resetAt) : "" };
 }
 
 function cacheBlock({ Text, Svg }, mode, state) {
   const parts = [];
   if (mode === "svg") {
-    parts.push(icon(Svg, "i", "bolt", ICON_COLORS[state.tone] ?? ICON_COLORS.calm, T.icons.cache));
+    const color = ICON_COLORS[state.tone] ?? ICON_COLORS.calm;
+    parts.push(icon(Svg, "i", "bolt", color, T.icons.cache));
   }
   // In the app the bolt says "cache"; the terminal keeps the word.
   if (mode !== "svg") parts.push(Text({ key: "l", children: T.cache }));
@@ -731,18 +810,23 @@ function cacheBlock({ Text, Svg }, mode, state) {
   const valueColor =
     state.tone === "alert" ? TONES.alert.text : state.tone === "fast" && (!state.urgent || !state.detail) ? TONES.fast.text : undefined;
   parts.push(Text(state.tone === "none" ? { key: "v", dimColor: true, children: state.value } : { key: "v", bold: true, ...(valueColor ? { color: valueColor } : {}), children: state.value }));
-  if (state.detail && mode !== "none") {
-    if (mode === "svg") parts.push(divider(Text, "s"));
-    const text = mode === "svg" ? state.detail : `· ${state.detail}`;
-    parts.push(Text(state.urgent ? { key: "d", bold: true, color: TONES.fast.text, children: text } : { key: "d", dimColor: true, children: text }));
+  // After the value: the urgent detail in yellow, then the rest dim (the stake, and in the
+  // terminal the advice the app keeps for the tooltip).
+  if (mode !== "none") {
+    const lead = state.urgent ? state.detail : "";
+    const rest = [state.urgent ? "" : state.detail, state.stake, mode === "text" ? state.advice : ""].filter(Boolean).join(" · ");
+    if (mode === "svg" && (lead || rest)) parts.push(divider(Text, "s"));
+    if (lead) parts.push(Text({ key: "d", bold: true, color: TONES.fast.text, children: mode === "svg" ? lead : `· ${lead}` }));
+    if (rest) parts.push(Text({ key: "e", dimColor: true, children: mode === "svg" && !lead ? rest : `· ${rest}` }));
   }
   const tint = TINTS[state.tone] ?? TINTS.calm;
-  return { key: "cache", tint, parts };
+  // Hover the pill for the expiry time, the share read, the costs and the advice.
+  return { key: "cache", tint, parts, tip: state.tip ?? "" };
 }
 
 // ---------- Limits: gauges ----------
 
-// Character bar: solid up to the share used; the gap with elapsed time in heavy dashes ╍,
+// Character bar: solid up to the share used; the gap with elapsed time in thick dashes ╍,
 // in the bar's color when using faster than time, grey otherwise.
 function textGauge(Box, Text, g) {
   const used = Math.round((g.used / 100) * TEXT_CELLS);
@@ -801,7 +885,7 @@ function drawLine(elements, surface, columns, now) {
     const f = forecastFor(cur.percent);
     const title = T.contextAlt(T.weather[f.id], T.percent(cur.percent), short(cur.window));
     const icon = desktop
-      ? Svg({ key: "icon", source: weatherSvg(f.id, title), alt: title, width: WEATHER_ICON_SIZE, height: WEATHER_ICON_SIZE, isInteractive: true })
+      ? Svg({ key: "icon", source: weatherSvg(f.id), alt: title, width: WEATHER_ICON_SIZE, height: WEATHER_ICON_SIZE })
       : Text({ key: "icon", color: f.color, bold: true, children: f.icon });
     const parts = [icon, Text({ key: "tokens", bold: true, children: short(cur.tokens) })];
     // A single reading draws no trend: the bars wait for the second turn.
@@ -815,7 +899,7 @@ function drawLine(elements, surface, columns, now) {
       const trend = trendWord();
       if (trend) parts.push(Text({ key: "d", dimColor: true, children: trend }));
     }
-    blocks.push({ key: "context", tint: TINTS.context, parts });
+    blocks.push({ key: "context", tint: TINTS.context, parts, tip: title });
   }
   for (const g of gauges) blocks.push(gaugeBlock(elements, mode, g));
   if (cacheNow) blocks.push(cacheBlock(elements, mode, cacheNow));
@@ -830,30 +914,13 @@ function drawLine(elements, surface, columns, now) {
     }
     blocks.push({ key: "cost", tint: TINTS.cost, parts });
   }
-  // Heavy thread, after the cost: what each action costs next to a fresh thread.
-  const heavy = heavyState();
-  if (heavy) {
-    const parts = [];
-    // In the app, bag and figure are one drawing: the whole pill shows the tooltip.
-    if (desktop) parts.push(heavySvg(Svg, heavy));
-    else {
-      parts.push(Text({ key: "l", children: T.heavy }));
-      parts.push(Text({ key: "v", bold: true, color: TONES[heavy.tone].text, children: heavy.times }));
-      if (mode !== "none") parts.push(Text({ key: "d", dimColor: true, children: `· ${T.fresh}` }));
-    }
-    blocks.push({ key: "heavy", tint: TINTS[heavy.tone], parts });
-  }
   // Agents last, shown only while some run: the blocks before them stay in place.
   if (agents.length > 0) {
     const parts = [];
-    if (desktop) {
-      // The tooltip lists what each one is doing.
-      const title = agents.map((a) => `${a.type} · ${a.description}`).join("\n");
-      const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_SIZE}" height="${ICON_SIZE}" viewBox="0 0 24 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>${ICONS.agents(ICON_COLORS.agents)}</svg>`;
-      parts.push(Svg({ key: "i", source, alt: T.icons.agents, width: ICON_SIZE, height: ICON_SIZE, isInteractive: true }));
-    }
+    if (desktop) parts.push(icon(Svg, "i", "agents", ICON_COLORS.agents, T.icons.agents));
     parts.push(Text({ key: "v", bold: true, children: T.agents(agents.length) }));
-    blocks.push({ key: "agents", tint: TINTS.agents, parts });
+    // The hover card lists what each one is doing.
+    blocks.push({ key: "agents", tint: TINTS.agents, parts, tip: agents.map((a) => `${a.type} · ${a.description}`).join("\n") });
   }
 
   const row = (b) => ({ key: b.key, flexDirection: "row", columnGap: 1, alignItems: "center", children: b.parts });
@@ -862,7 +929,19 @@ function drawLine(elements, surface, columns, now) {
     // a border brings a padding that made the band taller than the prompt box: paddingY, set
     // after it, takes the vertical part back.
     // A pill never shrinks: squeezed, the app broke "24 %" over two lines.
-    const pills = blocks.map((b) => Box({ ...row(b), flexShrink: 0, paddingX: 1, paddingY: 0, borderStyle: "round", borderColor: b.tint[1], backgroundColor: b.tint[0] }));
+    // A keyed pill is a hover scope: its card shows while the pointer is over it.
+    const pills = blocks.map((b) =>
+      Box({
+        ...row(b),
+        children: b.tip ? [...b.parts, hoverCard(Box, Text, b.tip)] : b.parts,
+        flexShrink: 0,
+        paddingX: 1,
+        paddingY: 0,
+        borderStyle: "round",
+        borderColor: b.tint[1],
+        backgroundColor: b.tint[0],
+      }),
+    );
     return Box({ flexDirection: "row", alignItems: "center", columnGap: 1, paddingX: 1, children: pills });
   }
   const children = [];
@@ -894,11 +973,6 @@ function textWidth(gauges, cacheNow) {
     width += T.cost(cost).length + (share ? 3 + share.length : 0);
     blocks++;
   }
-  const heavy = heavyState();
-  if (heavy) {
-    width += heavyText(heavy).length;
-    blocks++;
-  }
   if (agents.length > 0) {
     width += T.agents(agents.length).length;
     blocks++;
@@ -924,9 +998,6 @@ function lastPromptText() {
   return parts.join(" · ");
 }
 
-function escapeXml(text) {
-  return String(text).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
-}
 
 // ---------- Weather: readings and drawing (Token Weather) ----------
 
