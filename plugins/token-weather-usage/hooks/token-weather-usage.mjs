@@ -1,6 +1,6 @@
 // Token Weather Usage: one line above the prompt.
 //   Terminal, blocks split by a thin rule:
-//   ☁ 440k ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━━╍╍╍── 37% · 2h22 → 18:20 │ 7d ━━━━╍─── 60% · 2d23h │ cache 98% · 52 min │ ≈ $4.32 (+$0.84) │ 2 agents
+//   ☁ 440k ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━╍╍── 37% · 2h22 → 18:20 │ 7d ━━━╍── 60% · 2d23h │ cache 98% · 52 min │ ≈ $4.32 (+$0.84 · +2% 5h) │ heavy thread ×4.4 · start a new thread │ 2 agents
 //   Desktop app: the same blocks as tinted, outlined pills.
 //
 // Weather, context and recent turns: adapted from the Token Weather example,
@@ -34,8 +34,13 @@ const TEXT = {
     underMinute: "< 1 min",
     cost: (usd) => `≈ $${usd.toFixed(2)}`,
     lastPrompt: (usd) => `+$${usd.toFixed(2)}`,
+    lastPrompt5h: (points) => `+${decimal(points)}% 5h`,
+    heavy: "heavy thread",
+    times: (x) => `×${decimal(x)}`,
+    fresh: "start a new thread",
+    toRewrite: (tokens) => `${tokens} to rewrite`,
     agents: (n) => (n === 1 ? "1 agent" : `${n} agents`),
-    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents running" },
+    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents running", heavy: "Heavy thread" },
   },
   fr: {
     weather: { clear: "Clair", cloudy: "Nuageux", showers: "Averses", storm: "Orage", compact: "Compacter bientôt" },
@@ -52,8 +57,13 @@ const TEXT = {
     underMinute: "< 1 min",
     cost: (usd) => `≈ ${usd.toFixed(2).replace(".", ",")} $`,
     lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
+    lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")} % 5h`,
+    heavy: "fil lourd",
+    times: (x) => `×${decimal(x).replace(".", ",")}`,
+    fresh: "nouveau fil",
+    toRewrite: (tokens) => `${tokens} à réécrire`,
     agents: (n) => (n === 1 ? "1 agent" : `${n} agents`),
-    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents en cours" },
+    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents en cours", heavy: "Fil lourd" },
   },
 };
 let T = TEXT.en;
@@ -160,6 +170,25 @@ let cost = null;
 // What the last prompt added to it (its subagents included), and the total it started from.
 let lastPrompt = null;
 let promptBase = null;
+// The same in points of the 5-hour limit (an account figure: other sessions running at the
+// same time count in it), and the reading it started from.
+let lastPrompt5h = null;
+let promptBase5h = null;
+
+// ---------- Heavy thread ----------
+
+// Every request reads the whole context again: past 300k tokens a thread costs several times a
+// fresh one for each action, and starting a new thread is the main saving. Red past 500k.
+const HEAVY = 300_000;
+const VERY_HEAVY = 500_000;
+// What a fresh thread starts with (tools, connectors, skills, instructions): the smallest first
+// reading of the last fresh sessions, kept across sessions; 100k until one is measured.
+const BASELINE_KEY = "baseline";
+const BASELINE_KEEP = 8;
+const DEFAULT_BASELINE = 100_000;
+let baseline = DEFAULT_BASELINE;
+// True from the start of a new conversation until its first real context reading.
+let fresh = false;
 
 // Subagents running now: { id, description, type }.
 let agents = [];
@@ -168,8 +197,8 @@ let agentsKey = "";
 // ---------- Layout ----------
 
 const SEP = "│";
-const TEXT_CELLS = 8;
-const GAUGE = { width: 72, height: 9 };
+const TEXT_CELLS = 6;
+const GAUGE = { width: 54, height: 9 };
 const TONES = {
   calm: { svg: "#3fa66b", text: "green" },
   fast: { svg: "#d9962b", text: "yellow" },
@@ -213,6 +242,8 @@ const ICONS = {
     `<rect x="4" y="7.5" width="16" height="12.5" rx="3.5" fill="${c}" fill-opacity="0.14" stroke="${c}" stroke-width="2"/><path d="M12 7.5V4M2 12.5v3M22 12.5v3" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="3.2" r="1.3" fill="${c}"/><circle cx="9" cy="13" r="1.5" fill="${c}"/><circle cx="15" cy="13" r="1.5" fill="${c}"/><path d="M9.5 16.8h5" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round"/>`,
 };
 // Icon color per block: deeper than the pill's tint, readable on light and dark backgrounds.
+ICONS.heavy = (c) =>
+  `<path d="M8.6 9.5a3.4 3.4 0 1 1 6.8 0" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><path d="M6.2 9.5h11.6l2 10.4a1.6 1.6 0 0 1-1.6 1.9H5.8a1.6 1.6 0 0 1-1.6-1.9z" fill="${c}" fill-opacity="0.16" stroke="${c}" stroke-width="2" stroke-linejoin="round"/>`;
 const ICON_COLORS = { five_hour: "#3a9a62", seven_day: "#8a5fd0", spend_limit: "#b8892a", calm: "#1b9cbe", fast: "#d9962b", alert: "#d64545", cost: "#b8892a", agents: "#c4507f" };
 const LIMIT_ICONS = { five_hour: "gauge", seven_day: "calendar", spend_limit: "coin" };
 // Columns the terminal may cover at the end of the band.
@@ -230,14 +261,19 @@ export function register(on, options) {
     cache = null;
     seenTtl = null;
     lastPrompt = null;
+    lastPrompt5h = null;
     cacheKey = "";
     cacheEnv = await cacheEnvOf($);
     turnsKey = TURNS_PREFIX + (await $.session.id());
     await restoreTurns($);
+    baseline = await baselineOf($);
+    // A new conversation (not a resumed one): its first reading measures the starting load.
+    fresh = (e.source === "startup" || e.source === "clear") && !readings.some((r) => r.tokens > 0);
     const usage = await $.session.usage();
     pushReading(usage.context);
     cost = usage.cost?.usd ?? null;
     promptBase = cost;
+    promptBase5h = fiveHourOf(usage.rateLimits);
     agents = [];
     agentsKey = "";
     await refreshAgents($);
@@ -298,10 +334,20 @@ export function register(on, options) {
     try {
       const usage = await $.session.usage();
       pushReading(usage.context);
+      if (fresh && readings.some((r) => r.tokens > 0)) {
+        fresh = false;
+        await recordBaseline($, readings[readings.length - 1].tokens);
+      }
       if (usage.cost) {
         cost = usage.cost.usd;
         if (promptBase !== null && cost >= promptBase) lastPrompt = cost - promptBase;
         promptBase = cost;
+      }
+      // A window that reset in between gives no share.
+      const now5h = fiveHourOf(usage.rateLimits);
+      if (now5h !== null) {
+        lastPrompt5h = promptBase5h !== null && now5h >= promptBase5h ? Math.round((now5h - promptBase5h) * 10) / 10 : null;
+        promptBase5h = now5h;
       }
       await saveTurns($);
       $.ui.invalidate("ui.render");
@@ -363,6 +409,7 @@ async function restoreTurns($) {
         if (saved.cache && Number.isFinite(saved.cache.at)) cache = saved.cache;
         if (saved.seenTtl === "5m" || saved.seenTtl === "1h") seenTtl = saved.seenTtl;
         if (Number.isFinite(saved.lastPrompt)) lastPrompt = saved.lastPrompt;
+        if (Number.isFinite(saved.lastPrompt5h)) lastPrompt5h = saved.lastPrompt5h;
       } else if (!saved || !(now - saved.at < TURNS_KEEP_MS)) await $.store.delete(key);
     }
   } catch {
@@ -373,10 +420,45 @@ async function restoreTurns($) {
 async function saveTurns($) {
   if (!turnsKey) return;
   try {
-    await $.store.set(turnsKey, { at: await $.clock.now(), readings, cache, seenTtl, lastPrompt });
+    await $.store.set(turnsKey, { at: await $.clock.now(), readings, cache, seenTtl, lastPrompt, lastPrompt5h });
   } catch {
     // Not saved this turn: the bars come back on the next one.
   }
+}
+
+// ---------- Heavy thread: the starting load ----------
+
+async function baselineOf($) {
+  try {
+    const saved = await $.store.get(BASELINE_KEY);
+    const values = Array.isArray(saved?.list) ? saved.list.filter((v) => Number.isFinite(v) && v > 0) : [];
+    return values.length > 0 ? Math.min(...values) : DEFAULT_BASELINE;
+  } catch {
+    return DEFAULT_BASELINE;
+  }
+}
+
+async function recordBaseline($, tokens) {
+  try {
+    const saved = await $.store.get(BASELINE_KEY);
+    const list = [...(Array.isArray(saved?.list) ? saved.list : []), tokens].slice(-BASELINE_KEEP);
+    await $.store.set(BASELINE_KEY, { at: await $.clock.now(), list });
+    baseline = Math.min(...list);
+  } catch {
+    // Not kept: the next fresh session measures it again.
+  }
+}
+
+// What the heavy-thread pill shows: { tone, times }; null under 300k tokens.
+function heavyState() {
+  if (readings.length === 0) return null;
+  const tokens = readings[readings.length - 1].tokens;
+  if (tokens < HEAVY) return null;
+  return { tone: tokens >= VERY_HEAVY ? "alert" : "fast", times: T.times(tokens / baseline) };
+}
+
+function heavyText(state) {
+  return state ? `${T.heavy} ${state.times} · ${T.fresh}` : "";
 }
 
 // ---------- Limits: shared reading ----------
@@ -443,6 +525,17 @@ function clockTime(ms) {
     const d = new Date(ms);
     return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
   }
+}
+
+// The 5-hour window's share used, or null without one.
+function fiveHourOf(list) {
+  const w = (list ?? []).find((l) => l.kind === "five_hour");
+  return w && Number.isFinite(w.percentUsed) ? w.percentUsed : null;
+}
+
+// 6.5, 12, 0.4: one decimal under 10.
+function decimal(x) {
+  return x >= 10 ? String(Math.round(x)) : String(Math.round(x * 10) / 10);
 }
 
 function bound(percent) {
@@ -521,7 +614,12 @@ function cacheState(now) {
   if (!cache) return { tone: "none", value: "—", detail: "" };
   const left = cache.at + ttlMs() - now;
   const tokens = readings.length > 0 ? readings[readings.length - 1].tokens : promptOf(cache);
-  if (left <= 0) return { tone: "alert", value: T.expired, detail: tokens >= COMPACT_AT ? "/compact" : "" };
+  // Expired: say what the next message writes again, and the way out. On a heavy thread the
+  // heavy-thread pill already advises a new one.
+  if (left <= 0) {
+    const detail = tokens >= HEAVY ? T.toRewrite(short(tokens)) : tokens >= COMPACT_AT ? `${T.toRewrite(short(tokens))} · /compact` : "";
+    return { tone: "alert", value: T.expired, detail };
+  }
   const value = T.percent(hitOf(cache));
   if (cache.cause) return { tone: "fast", value, detail: `${T.missed} · ${T.causes[cache.cause]}` };
   const time = left < MINUTE ? T.underMinute : duration(left);
@@ -677,11 +775,25 @@ function drawLine(elements, surface, columns, now) {
   if (cost !== null && cost >= 0.005 && mode !== "none") {
     const parts = [Text({ key: "v", bold: true, children: T.cost(cost) })];
     if (desktop) parts.unshift(icon(Svg, "i", "coin", ICON_COLORS.cost, T.icons.cost));
-    if (lastPrompt !== null && lastPrompt >= 0.005) {
+    const share = lastPromptText();
+    if (share) {
       if (desktop) parts.push(divider(Text, "s"), icon(Svg, "p", "prompt", ICON_COLORS.cost, T.icons.lastPrompt, SMALL_ICON));
-      parts.push(Text({ key: "d", dimColor: true, children: desktop ? T.lastPrompt(lastPrompt) : `(${T.lastPrompt(lastPrompt)})` }));
+      parts.push(Text({ key: "d", dimColor: true, children: desktop ? share : `(${share})` }));
     }
     blocks.push({ key: "cost", tint: TINTS.cost, parts });
+  }
+  // Heavy thread, after the cost: what each action costs next to a fresh thread.
+  const heavy = heavyState();
+  if (heavy) {
+    const parts = [];
+    if (desktop) parts.push(icon(Svg, "i", "heavy", ICON_COLORS[heavy.tone], T.icons.heavy));
+    parts.push(Text({ key: "l", children: T.heavy }));
+    parts.push(Text({ key: "v", bold: true, color: TONES[heavy.tone].text, children: heavy.times }));
+    if (mode !== "none") {
+      if (desktop) parts.push(divider(Text, "s"));
+      parts.push(Text({ key: "d", dimColor: true, children: desktop ? T.fresh : `· ${T.fresh}` }));
+    }
+    blocks.push({ key: "heavy", tint: TINTS[heavy.tone], parts });
   }
   // Agents last, shown only while some run: the blocks before them stay in place.
   if (agents.length > 0) {
@@ -729,7 +841,13 @@ function textWidth(gauges, cacheNow) {
     blocks++;
   }
   if (cost !== null && cost >= 0.005) {
-    width += T.cost(cost).length + (lastPrompt !== null && lastPrompt >= 0.005 ? 3 + T.lastPrompt(lastPrompt).length : 0);
+    const share = lastPromptText();
+    width += T.cost(cost).length + (share ? 3 + share.length : 0);
+    blocks++;
+  }
+  const heavy = heavyState();
+  if (heavy) {
+    width += heavyText(heavy).length;
     blocks++;
   }
   if (agents.length > 0) {
@@ -746,6 +864,14 @@ function isBlank(node) {
   if (typeof node === "string") return node.trim() === "";
   if (typeof node === "object" && (node.type === "Box" || node.type === "Text")) return isBlank(node.props?.children);
   return false;
+}
+
+// "+1,07 $ · +2 % 5h": what the last prompt cost, in dollars and in points of the 5-hour limit.
+function lastPromptText() {
+  const parts = [];
+  if (lastPrompt !== null && lastPrompt >= 0.005) parts.push(T.lastPrompt(lastPrompt));
+  if (lastPrompt5h !== null && lastPrompt5h >= 0.1) parts.push(T.lastPrompt5h(lastPrompt5h));
+  return parts.join(" · ");
 }
 
 function escapeXml(text) {

@@ -15,13 +15,14 @@ One band above the Claude Code prompt: the context in tokens, your 5-hour and 7-
 - **Context**: tokens in the context with a weather icon (hover it for the share of the window), one bar per recent prompt, the last prompt's change.
 - **5h / 7d**: the share of your account's limits already used, in green, yellow or red by pace. The gap with the time elapsed is hatched: grey while you have margin, in the bar's color when you use faster than time passes. Then the time left and the reset time (machine's time zone).
 - **Cache**: the share of the last message read from the prompt cache and the time before it lapses (1 hour on a subscription, 5 minutes on an API key, inferred). Yellow under 10 minutes, "missed" with its cause, red "expired" with `/compact` on a large context.
-- **Cost**: the session cost as `/cost` totals it, and what the last prompt added. On a subscription, an API-price equivalent, not a bill.
+- **Cost**: the session cost as `/cost` totals it, and what the last prompt added, in dollars and in points of the 5-hour limit. On a subscription, an API-price equivalent, not a bill.
+- **Heavy thread**: from 300k tokens of context (red from 500k), "heavy thread ×3 · start a new thread": what each action costs next to a fresh thread of yours.
 - **Agents**: shown while subagents run; hover the robot for their tasks.
 
 In the terminal:
 
 ```
-☂ 634k ▃▆▂█▃▄▂▆ ▲ +6.3k │ 5h ━━━━━━╍─ 74% · 24 min → 18:20 │ 7d ━━━━━─── 65% · 2d20h │ cache 98% · 52 min │ ≈ $41.07 (+$0.58) │ 2 agents
+☂ 634k ▃▆▂█▃▄▂▆ ▲ +6.3k │ 5h ━━━━╍─ 74% · 24 min → 18:20 │ 7d ━━━━── 65% · 2d20h │ cache 98% · 52 min │ ≈ $41.07 (+$0.58 · +1.5% 5h) │ heavy thread ×5.6 · start a new thread │ 2 agents
 ```
 
 Labels in English or French: `auto` follows `LC_ALL`, `LC_MESSAGES` or `LANG`, otherwise pick `en` or `fr` in the **Language** option (`/config`).

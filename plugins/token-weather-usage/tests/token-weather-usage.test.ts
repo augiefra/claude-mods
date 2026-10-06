@@ -223,9 +223,9 @@ for (const surface of ["terminal", "desktop"] as const) {
     const { ui } = await band($, surface);
     if (surface === "terminal") {
       const dashes = (await ui.findAll({ type: "Text", text: "╍" })) as any[];
-      // 2 grey margin cells (5 h), 1 red cell ahead (7 d).
+      // 6 cells: 2 grey margin cells (5 h), 2 red cells ahead (7 d).
       expect(dashes.filter((d) => d.props?.dimColor).length).toBe(2);
-      expect(dashes.filter((d) => d.props?.color === "red").length).toBe(1);
+      expect(dashes.filter((d) => d.props?.color === "red").length).toBe(2);
     } else {
       const svgs = (await ui.findAll({ type: "Svg" })) as any[];
       const gauges = svgs.filter((s) => String(s.props?.alt ?? "").includes("used"));
@@ -292,8 +292,8 @@ test("cache: yellow under 10 minutes, then expired with /compact", async ($, on)
   await (clock as any).advance(6 * 60_000);
   ({ ui, texts } = await band($, "terminal"));
   expect(texts).toContain("expired");
-  // 107k of context: past 100k, /compact before going on.
-  expect(texts).toContain("· /compact");
+  // 107k of context: past 100k, what gets written again and /compact before going on.
+  expect(texts).toContain("· 107k to rewrite · /compact");
   const expired: any = await ui.find({ type: "Text", text: "expired" });
   expect(expired?.props?.color).toBe("red");
 });
@@ -372,4 +372,98 @@ test("agents: a pill while subagents run, gone once they finish", async ($, on) 
   await ($ as any).turn.complete({ answer: "ok", agentId: "a1" } as any);
   const after = await band($, "terminal");
   expect(after.texts.some((t: string) => t.includes("agent"))).toBe(false);
+});
+
+// ---------- Heavy thread ----------
+
+function heavyWorld(on: any, tokens: number, stored: Record<string, unknown> = {}) {
+  world(on, {}, stored);
+  withUsage(on, LIMITS, { tokens, window: 1_000_000, percent: Math.round(tokens / 10_000) });
+}
+
+test("heavy thread: hidden under 300k", async ($, on) => {
+  heavyWorld(on, 250_000);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).not.toContain("heavy thread");
+});
+
+for (const surface of ["terminal", "desktop"] as const) {
+  test(`heavy thread: yellow from 300k, against the measured baseline ${surface}`, async ($, on) => {
+    // Fresh sessions started at 120k and 114k: the baseline is the smallest.
+    heavyWorld(on, 342_000, { baseline: { at: NOW, list: [120_000, 114_000] } });
+    await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+    const { ui, texts } = await band($, surface);
+    expect(texts).toContain("heavy thread");
+    expect(texts).toContain("×3");
+    const times: any = await ui.find({ type: "Text", text: "×3" });
+    expect(times?.props?.color).toBe("yellow");
+    expect(texts).toContain(surface === "terminal" ? "· start a new thread" : "start a new thread");
+  });
+}
+
+test("heavy thread: red from 500k, 100k baseline until one is measured", async ($, on) => {
+  heavyWorld(on, 652_000);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "terminal");
+  expect(texts).toContain("×6.5");
+  const times: any = await ui.find({ type: "Text", text: "×6.5" });
+  expect(times?.props?.color).toBe("red");
+});
+
+test("heavy thread: a fresh session records its starting load", async ($, on) => {
+  const store = new Map<string, unknown>([["baseline", { at: NOW, list: [130_000] }]]);
+  mock.clock(on, { now: NOW });
+  mock.env(on, {});
+  on("store.get", (_$: any, e: any) => ({ value: store.get(e.key) }));
+  on("store.set", (_$: any, e: any) => (store.set(e.key, e.value), { value: undefined }));
+  on("store.delete", (_$: any, e: any) => (store.delete(e.key), { value: undefined }));
+  on("store.keys", () => ({ value: [...store.keys()] }));
+  on("session.id", () => ({ value: "session-2" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  on("turn.complete", () => ({ text: "" }));
+  let call = 0;
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: call++ === 0 ? 0 : 112_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await ($ as any).turn.complete({ answer: "ok" } as any);
+  expect((store.get("baseline") as any).list).toEqual([130_000, 112_000]);
+});
+
+test("cache expired on a heavy thread: what gets written again, and a new thread", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, {});
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  withUsage(on, LIMITS, { tokens: 741_000, window: 1_000_000, percent: 74 });
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await (clock as any).advance(61 * 60_000);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("· 741k to rewrite");
+  // The way out sits once, in the heavy-thread pill.
+  expect(texts.filter((t: string) => t.includes("start a new thread")).length).toBe(1);
+});
+
+test("last prompt: its share of the 5-hour limit next to its cost", async ($, on) => {
+  world(on, { LANG: "fr_FR.UTF-8" });
+  on("turn.complete", () => ({ text: "" }));
+  const steps = [
+    { usd: 4.0, five: 30 },
+    { usd: 5.07, five: 32.5 },
+  ];
+  let call = 0;
+  on("session.usage", () => {
+    const s = steps[Math.min(call++, steps.length - 1)];
+    return { value: { startedAt: NOW, context: { tokens: 107_000 + call * 1_000, window: 1_000_000, percent: 11 }, rateLimits: [{ ...LIMITS[1], percentUsed: s.five }, LIMITS[0]], cost: { usd: s.usd } } };
+  });
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await ($ as any).turn.complete({ answer: "ok" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("(+1,07 $ · +2,5 % 5h)");
 });
