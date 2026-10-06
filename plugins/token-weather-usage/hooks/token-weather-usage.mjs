@@ -34,7 +34,8 @@ const TEXT = {
     underMinute: "< 1 min",
     cost: (usd) => (usd >= 100 ? `≈ $${Math.round(usd)}` : `≈ $${usd.toFixed(2)}`),
     resetsAt: (time) => `Resets at ${time}`,
-    heavyTip: (times) => `Heavy thread: each action costs ${times} a fresh thread. Start a new thread.`,
+    heavyTip: (ratio, tokens, baseline) =>
+      `Heavy thread: ${tokens} tokens of context, ${decimal(ratio)} times your starting load (${baseline}).\nEvery action reads the whole context again: start a new thread.`,
     lastPrompt: (usd) => `+$${usd.toFixed(2)}`,
     lastPrompt5h: (points) => `+${decimal(points)}% 5h`,
     heavy: "heavy thread",
@@ -59,7 +60,8 @@ const TEXT = {
     underMinute: "< 1 min",
     cost: (usd) => (usd >= 100 ? `≈ ${Math.round(usd)} $` : `≈ ${usd.toFixed(2).replace(".", ",")} $`),
     resetsAt: (time) => `Remise à zéro à ${time}`,
-    heavyTip: (times) => `Fil lourd : chaque action coûte ${times} un fil neuf. Ouvre un nouveau fil.`,
+    heavyTip: (ratio, tokens, baseline) =>
+      `Fil lourd : ${tokens} tokens de contexte, ${decimal(ratio).replace(".", ",")} fois le départ d'un fil neuf (${baseline}).\nChaque action relit tout le contexte : ouvre un nouveau fil.`,
     lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
     lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")} % 5h`,
     heavy: "fil lourd",
@@ -230,8 +232,9 @@ const TINTS = {
 const ICON_SIZE = 16;
 const SMALL_ICON = 14;
 const ICONS = {
+  // Gauge and speech bubble are drawn around y=11.5: half a unit down centres them like the others.
   gauge: (c) =>
-    `<path d="M3.6 18.5a9.5 9.5 0 1 1 16.8 0" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><path d="M12 14.5l4.3-4.6" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="14.5" r="1.7" fill="${c}"/>`,
+    `<g transform="translate(0 0.5)"><path d="M3.6 18.5a9.5 9.5 0 1 1 16.8 0" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><path d="M12 14.5l4.3-4.6" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="14.5" r="1.7" fill="${c}"/></g>`,
   calendar: (c) =>
     `<rect x="3" y="4.5" width="18" height="17" rx="3" fill="none" stroke="${c}" stroke-width="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><text x="12" y="19.2" font-size="8.5" font-weight="700" font-family="-apple-system,Helvetica,Arial,sans-serif" text-anchor="middle" fill="${c}">7</text>`,
   // A clock turning back: the time left before the window starts over.
@@ -242,14 +245,15 @@ const ICONS = {
     `<circle cx="12" cy="12" r="9.5" fill="${c}" fill-opacity="0.16" stroke="${c}" stroke-width="2"/><path d="M15 8.8c-.5-1-1.6-1.6-3-1.6-1.7 0-3 .9-3 2.2s1.3 1.8 3 2.1 3 .9 3 2.2-1.3 2.3-3 2.3c-1.4 0-2.5-.6-3.1-1.6M12 5.6v1.6M12 16.8v1.6" fill="none" stroke="${c}" stroke-width="1.9" stroke-linecap="round"/>`,
   // A speech bubble: what the last prompt cost.
   prompt: (c) =>
-    `<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5z" fill="${c}" fill-opacity="0.14" stroke="${c}" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 8.5h7M8.5 11.5h4.5" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/>`,
+    `<g transform="translate(0 0.5)"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5z" fill="${c}" fill-opacity="0.14" stroke="${c}" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 8.5h7M8.5 11.5h4.5" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/></g>`,
   // A small robot: subagents at work.
   agents: (c) =>
     `<rect x="4" y="7.5" width="16" height="12.5" rx="3.5" fill="${c}" fill-opacity="0.14" stroke="${c}" stroke-width="2"/><path d="M12 7.5V4M2 12.5v3M22 12.5v3" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="3.2" r="1.3" fill="${c}"/><circle cx="9" cy="13" r="1.5" fill="${c}"/><circle cx="15" cy="13" r="1.5" fill="${c}"/><path d="M9.5 16.8h5" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round"/>`,
 };
-// Icon color per block: deeper than the pill's tint, readable on light and dark backgrounds.
+// A weight (a bag with a handle): the heavy thread, centred at y=12.
 ICONS.heavy = (c) =>
-  `<path d="M8.6 9.5a3.4 3.4 0 1 1 6.8 0" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><path d="M6.2 9.5h11.6l2 10.4a1.6 1.6 0 0 1-1.6 1.9H5.8a1.6 1.6 0 0 1-1.6-1.9z" fill="${c}" fill-opacity="0.16" stroke="${c}" stroke-width="2" stroke-linejoin="round"/>`;
+  `<path d="M8.6 7.5a3.4 3.4 0 1 1 6.8 0" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round"/><path d="M6.2 7.5h11.6l2 10.4a1.6 1.6 0 0 1-1.6 1.9H5.8a1.6 1.6 0 0 1-1.6-1.9z" fill="${c}" fill-opacity="0.16" stroke="${c}" stroke-width="2" stroke-linejoin="round"/>`;
+// Icon color per block: deeper than the pill's tint, readable on light and dark backgrounds.
 const ICON_COLORS = { five_hour: "#3a9a62", seven_day: "#8a5fd0", spend_limit: "#b8892a", calm: "#1b9cbe", fast: "#d9962b", alert: "#d64545", cost: "#b8892a", agents: "#c4507f" };
 const LIMIT_ICONS = { five_hour: "gauge", seven_day: "calendar", spend_limit: "coin" };
 // Columns the terminal may cover at the end of the band.
@@ -455,12 +459,14 @@ async function recordBaseline($, tokens) {
   }
 }
 
-// What the heavy-thread pill shows: { tone, times }; null under 300k tokens.
+// What the heavy-thread pill shows: { tone, ratio, times, tokens, baseline }, the last two
+// shortened (605k, 112k); null under 300k tokens.
 function heavyState() {
   if (readings.length === 0) return null;
   const tokens = readings[readings.length - 1].tokens;
   if (tokens < HEAVY) return null;
-  return { tone: tokens >= VERY_HEAVY ? "alert" : "fast", times: T.times(tokens / baseline) };
+  const ratio = tokens / baseline;
+  return { tone: tokens >= VERY_HEAVY ? "alert" : "fast", ratio, times: T.times(ratio), tokens: short(tokens), baseline: short(baseline) };
 }
 
 function heavyText(state) {
@@ -671,6 +677,27 @@ function tipIcon(Svg, key, name, color, alt, title, size = ICON_SIZE) {
   return Svg({ key, source, alt, width: size, height: size, isInteractive: true });
 }
 
+// Heavy thread in the app: the bag and "×5.4" in one interactive drawing, so the tooltip covers
+// the whole pill (a Text cannot carry one). 16 px high; the width follows the figure, from the
+// advance of each character at font size 20 in grid units (24 per 16 px).
+const HEAVY_FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif";
+// Advances measured on SF Pro at weight 650: digits 12.5, "×" 14.5, separators 5.5.
+const HEAVY_ADVANCE = { "×": 14.5, ",": 5.5, ".": 5.5 };
+// Where the figure starts: the bag (24) and the same gap as between an icon and its text.
+const HEAVY_TEXT_X = 31;
+function heavySvg(Svg, heavy) {
+  const figure = heavy.times;
+  const units = HEAVY_TEXT_X + [...figure].reduce((sum, c) => sum + (HEAVY_ADVANCE[c] ?? 12.5), 0) + 3;
+  const width = Math.ceil((units * ICON_SIZE) / 24);
+  const title = T.heavyTip(heavy.ratio, heavy.tokens, heavy.baseline);
+  // The text takes the tone's drawing color: a Text's "yellow" is a theme color, an SVG's is pure yellow.
+  const source =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${ICON_SIZE}" viewBox="0 0 ${(width * 24) / ICON_SIZE} 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>` +
+    `${ICONS.heavy(ICON_COLORS[heavy.tone])}` +
+    `<text x="${HEAVY_TEXT_X}" y="19" font-size="20" font-weight="650" font-family="${HEAVY_FONT}" style="font-variant-numeric:tabular-nums" fill="${TONES[heavy.tone].svg}">${escapeXml(figure)}</text></svg>`;
+  return Svg({ key: "i", source, alt: T.icons.heavy, width, height: ICON_SIZE, isInteractive: true });
+}
+
 function divider(Text, key) {
   return Text({ key, dimColor: true, children: SEP });
 }
@@ -807,11 +834,13 @@ function drawLine(elements, surface, columns, now) {
   const heavy = heavyState();
   if (heavy) {
     const parts = [];
-    // In the app the icon and its color say it, the advice sits in the tooltip.
-    if (desktop) parts.push(tipIcon(Svg, "i", "heavy", ICON_COLORS[heavy.tone], T.icons.heavy, T.heavyTip(heavy.times)));
-    else parts.push(Text({ key: "l", children: T.heavy }));
-    parts.push(Text({ key: "v", bold: true, color: TONES[heavy.tone].text, children: heavy.times }));
-    if (!desktop && mode !== "none") parts.push(Text({ key: "d", dimColor: true, children: `· ${T.fresh}` }));
+    // In the app, bag and figure are one drawing: the whole pill shows the tooltip.
+    if (desktop) parts.push(heavySvg(Svg, heavy));
+    else {
+      parts.push(Text({ key: "l", children: T.heavy }));
+      parts.push(Text({ key: "v", bold: true, color: TONES[heavy.tone].text, children: heavy.times }));
+      if (mode !== "none") parts.push(Text({ key: "d", dimColor: true, children: `· ${T.fresh}` }));
+    }
     blocks.push({ key: "heavy", tint: TINTS[heavy.tone], parts });
   }
   // Agents last, shown only while some run: the blocks before them stay in place.
@@ -882,7 +911,8 @@ function isBlank(node) {
   if (node == null || node === false || node === "") return true;
   if (Array.isArray(node)) return node.every(isBlank);
   if (typeof node === "string") return node.trim() === "";
-  if (typeof node === "object" && (node.type === "Box" || node.type === "Text")) return isBlank(node.props?.children);
+  // An element carries its children beside its props, not inside them.
+  if (typeof node === "object" && (node.type === "Box" || node.type === "Text")) return isBlank(node.children ?? node.props?.children);
   return false;
 }
 

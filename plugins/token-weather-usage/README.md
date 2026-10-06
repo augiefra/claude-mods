@@ -16,7 +16,7 @@ One band above the Claude Code prompt: the context in tokens, your 5-hour and 7-
 - **5h / 7d**: the share of your account's limits already used, in green, yellow or red by pace. The gap with the time elapsed is hatched: grey while you have margin, in the bar's color when you use faster than time passes. Then the time left; in the app, hover the clock for the 5-hour reset time (machine's time zone).
 - **Cache**: the time before the prompt cache lapses (1 hour on a subscription, 5 minutes on an API key, inferred), behind a bolt in the app. The share of the last message read from the cache shows only under 90%. Yellow under 10 minutes, "missed" with its cause, red "expired" with `/compact` on a large context.
 - **Cost**: the session cost as `/cost` totals it (whole dollars from $100), and what the last prompt added, in dollars and in points of the 5-hour limit. On a subscription, an API-price equivalent, not a bill.
-- **Heavy thread**: from 300k tokens of context (red from 500k), what each action costs next to a fresh thread of yours: a weight and "×3" in the app (hover it for the advice), "heavy thread ×3 · start a new thread" in the terminal.
+- **Heavy thread**: from 300k tokens of context (red from 500k), what each action costs next to a fresh thread of yours: a weight and "×3" in the app (hover anywhere on the pill: context size, ratio to your starting load, and the advice to start a new thread), "heavy thread ×3 · start a new thread" in the terminal.
 - **Agents**: shown while subagents run; hover the robot for their tasks.
 
 In the terminal:

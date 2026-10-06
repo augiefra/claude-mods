@@ -11,14 +11,15 @@ const LIMITS = [
   { kind: "five_hour", percentUsed: 32, resetsAt: new Date(NOW + 3 * 3_600_000).toISOString() },
 ];
 
-function world(on: any, env: Record<string, string> = {}, stored: Record<string, unknown> = {}) {
+// below: what a mod placed after this one draws under the line.
+function world(on: any, env: Record<string, string> = {}, stored: Record<string, unknown> = {}, below?: string) {
   mock.clock(on, { now: NOW });
   mock.store(on, stored);
   mock.env(on, env);
   on("session.id", () => ({ value: "session-1" }));
   on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
   on("ui.invalidate", () => ({ value: undefined }));
-  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  on("ui.render", ($: any, e: any) => (below ? $.ui.resolve(e).Text({ children: below }) : $.ui.resolve(e).Box({ children: [] })));
 }
 
 function withUsage(on: any, rateLimits: unknown[], context = { tokens: 107_000, window: 1_000_000, percent: 11 }) {
@@ -80,6 +81,15 @@ for (const surface of ["terminal", "desktop"] as const) {
 
 // The language option (en, fr) is not tested here: test(name, { options }, body) does not reach
 // register() in Claude Code 2.1.286. It was checked in a real session instead.
+test("keeps what later mods draw under the line", async ($, on) => {
+  world(on, {}, {}, "drawn after this mod");
+  withUsage(on, LIMITS);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("drawn after this mod");
+  expect(texts.indexOf("107k")).toBeLessThan(texts.indexOf("drawn after this mod"));
+});
+
 test("auto: French when LANG is French", async ($, on) => {
   world(on, { LANG: "fr_FR.UTF-8" });
   withUsage(on, LIMITS);
@@ -397,17 +407,30 @@ for (const surface of ["terminal", "desktop"] as const) {
     heavyWorld(on, 342_000, { baseline: { at: NOW, list: [120_000, 114_000] } });
     await $.session.start({ source: "resume", cwd: "/tmp" } as any);
     const { ui, texts } = await band($, surface);
-    expect(texts).toContain("×3");
-    const times: any = await ui.find({ type: "Text", text: "×3" });
-    expect(times?.props?.color).toBe("yellow");
     if (surface === "terminal") {
+      expect(texts).toContain("×3");
+      const times: any = await ui.find({ type: "Text", text: "×3" });
+      expect(times?.props?.color).toBe("yellow");
       expect(texts).toContain("heavy thread");
       expect(texts).toContain("· start a new thread");
     } else {
-      // In the app: icon and number; the words and the advice sit in the tooltip.
+      // In the app: bag and figure in one interactive drawing; the words and the advice sit in its tooltip.
       expect(texts).not.toContain("heavy thread");
+      expect(texts).not.toContain("×3");
       const svgs = (await ui.findAll({ type: "Svg" })) as any[];
-      expect(svgs.some((s) => s.props?.isInteractive && String(s.props?.source).includes("Start a new thread"))).toBe(true);
+      const pill = svgs.find((s) => s.props?.alt === "Heavy thread");
+      const source = String(pill?.props?.source);
+      expect(pill?.props?.isInteractive).toBe(true);
+      expect(source).toContain("color-scheme:light dark");
+      expect(source).toContain(">×3</text>");
+      expect(source).toContain('fill="#d9962b"');
+      expect(source).toContain(
+        "<title>Heavy thread: 342k tokens of context, 3 times your starting load (114k).\nEvery action reads the whole context again: start a new thread.</title>",
+      );
+      // 16 px high, wide enough for the bag and the figure.
+      expect(pill?.props?.height).toBe(16);
+      expect(pill?.props?.width).toBe(41);
+      expect(source).toContain('viewBox="0 0 61.5 24"');
     }
   });
 }
@@ -419,6 +442,40 @@ test("heavy thread: red from 500k, 100k baseline until one is measured", async (
   expect(texts).toContain("×6.5");
   const times: any = await ui.find({ type: "Text", text: "×6.5" });
   expect(times?.props?.color).toBe("red");
+});
+
+test("heavy thread: the app's tooltip in French", async ($, on) => {
+  world(on, { LANG: "fr_FR.UTF-8" });
+  withUsage(on, LIMITS, { tokens: 612_000, window: 1_000_000, percent: 61 });
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  const { ui } = await band($, "desktop");
+  const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+  const pill = svgs.find((s) => s.props?.alt === "Fil lourd");
+  const source = String(pill?.props?.source);
+  expect(pill?.props?.isInteractive).toBe(true);
+  expect(source).toContain(">×6,1</text>");
+  // Red from 500k.
+  expect(source).toContain('fill="#d64545"');
+  expect(source).toContain(
+    "<title>Fil lourd : 612k tokens de contexte, 6,1 fois le départ d'un fil neuf (100k).\nChaque action relit tout le contexte : ouvre un nouveau fil.</title>",
+  );
+});
+
+test("desktop icons: bag, gauge and speech bubble centred at y=12", async ($, on) => {
+  world(on);
+  on("turn.complete", () => ({ text: "" }));
+  const costs = [4.0, 4.84];
+  let call = 0;
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 400_000 + call * 1_000, window: 1_000_000, percent: 40 }, rateLimits: LIMITS, cost: { usd: costs[Math.min(call++, costs.length - 1)] } } }));
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  await ($ as any).turn.complete({ answer: "ok" } as any);
+  const { ui } = await band($, "desktop");
+  const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+  const source = (alt: string) => String(svgs.find((s) => s.props?.alt === alt)?.props?.source);
+  expect(source("Heavy thread")).toContain('d="M8.6 7.5a3.4 3.4 0 1 1 6.8 0"');
+  expect(source("Heavy thread")).toContain('d="M6.2 7.5h11.6l2 10.4a1.6 1.6 0 0 1-1.6 1.9H5.8a1.6 1.6 0 0 1-1.6-1.9z"');
+  expect(source("5-hour limit")).toContain('<g transform="translate(0 0.5)"><path d="M3.6 18.5');
+  expect(source("Last prompt")).toContain('<g transform="translate(0 0.5)"><path d="M4 5.5');
 });
 
 test("heavy thread: a fresh session records its starting load", async ($, on) => {
