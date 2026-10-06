@@ -1,6 +1,6 @@
 {
   "name": "token-weather-usage",
-  "version": "3.10.1",
+  "version": "3.10.2",
   "description": "One line above the prompt: context tokens with their weather, a bar per recent prompt, your 5-hour and 7-day limits against the time elapsed, the prompt cache with its time left, the session cost with the last prompt's share in dollars and in points of the 5-hour limit, a heavy-thread warning, and the subagents running. Labels in English or French. After Token Weather (Anthropic, Apache-2.0) and the ideas of usage-meter (HolyGrail) and prompt-cache-control (Daniel San).",
   "author": {
     "name": "Eric Cologni"

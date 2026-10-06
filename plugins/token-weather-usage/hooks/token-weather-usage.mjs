@@ -1,6 +1,6 @@
 // Token Weather Usage: one line above the prompt.
 //   Terminal, blocks split by a thin rule:
-//   ☁ 440k ▃▆▂█▃▄▂▇ ▲ +8.4k │ 5h ━━╍╍── 37% · 2h22 → 18:20 │ 7d ━━━╍── 60% · 2d23h │ cache 98% · 52 min │ ≈ $4.32 (+$0.84 · +2% 5h) │ heavy thread ×4.4 · start a new thread │ 2 agents
+//   ☁ 440k ▃▄▂▇▆ ▲ +8.4k │ 5h ━━╍╍── 37% · 2h22 │ 7d ━━━╍── 60% · 2d23h │ cache 52 min │ ≈ $4.32 (+$0.84 · +2% 5h) │ heavy thread ×4.4 · start a new thread │ 2 agents
 //   Desktop app: the same blocks as tinted, outlined pills.
 //
 // Weather, context and recent turns: adapted from the Token Weather example,
@@ -32,7 +32,9 @@ const TEXT = {
     missed: "missed",
     causes: { model: "model changed", lapsed: "lapsed", prefix: "start changed" },
     underMinute: "< 1 min",
-    cost: (usd) => `≈ $${usd.toFixed(2)}`,
+    cost: (usd) => (usd >= 100 ? `≈ $${Math.round(usd)}` : `≈ $${usd.toFixed(2)}`),
+    resetsAt: (time) => `Resets at ${time}`,
+    heavyTip: (times) => `Heavy thread: each action costs ${times} a fresh thread. Start a new thread.`,
     lastPrompt: (usd) => `+$${usd.toFixed(2)}`,
     lastPrompt5h: (points) => `+${decimal(points)}% 5h`,
     heavy: "heavy thread",
@@ -55,7 +57,9 @@ const TEXT = {
     missed: "raté",
     causes: { model: "modèle changé", lapsed: "délai dépassé", prefix: "début modifié" },
     underMinute: "< 1 min",
-    cost: (usd) => `≈ ${usd.toFixed(2).replace(".", ",")} $`,
+    cost: (usd) => (usd >= 100 ? `≈ ${Math.round(usd)} $` : `≈ ${usd.toFixed(2).replace(".", ",")} $`),
+    resetsAt: (time) => `Remise à zéro à ${time}`,
+    heavyTip: (times) => `Fil lourd : chaque action coûte ${times} un fil neuf. Ouvre un nouveau fil.`,
     lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
     lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")} % 5h`,
     heavy: "fil lourd",
@@ -83,7 +87,7 @@ const FORECAST = [
 
 // Turn bars: tokens added by each recent prompt; the current prompt takes the weather's tint
 // (colors readable on light and dark backgrounds), earlier ones stay grey.
-const TURN_BARS = 8;
+const TURN_BARS = 5;
 const SPARK = { height: 14, bar: 5.5, gap: 2 };
 const PAST_BAR = "rgba(127,127,127,0.45)";
 const SPARK_COLORS = { yellow: "#e0b000", cyan: "#1ba1c4", blue: "#2f68c0", magenta: "#b04fc0", red: "#d64545" };
@@ -156,6 +160,8 @@ const COMPACT_AT = 100_000;
 // A request that read less than half its prompt from the cache, and wrote more than this, missed.
 const MISS_SHARE = 50;
 const MISS_WRITE = 1_000;
+// From this share read from the cache, the pill shows the time left alone.
+const GOOD_HIT = 90;
 // Last main-loop request: { at, model, read, write, fresh, cause }.
 let cache = null;
 // Lifetime seen in the traffic ("5m" | "1h"), which beats the rules.
@@ -502,9 +508,10 @@ function gaugeOf(limit, now) {
   const elapsed = span && left !== null ? bound(((span - left) / span) * 100) : null;
   const pace = elapsed === null ? 0 : used - elapsed;
   const tone = used >= USED_ALERT || pace > PACE_ALERT ? "alert" : pace > 0 ? "fast" : "calm";
-  let when = "";
-  if (left !== null) when = limit.kind === "five_hour" ? `${duration(left)} → ${clockTime(resetMs)}` : duration(left);
-  return { kind: limit.kind, label: T.labels[limit.kind] ?? limit.kind, used, elapsed, tone, value: T.percent(Math.round(used)), when };
+  // The time left; the 5-hour reset time goes to the clock's tooltip.
+  const when = left !== null ? duration(left) : "";
+  const resetAt = left !== null && limit.kind === "five_hour" ? clockTime(resetMs) : "";
+  return { kind: limit.kind, label: T.labels[limit.kind] ?? limit.kind, used, elapsed, tone, value: T.percent(Math.round(used)), when, resetAt };
 }
 
 // 3h02, 42 min, 2d23h (2j23h in French).
@@ -620,10 +627,13 @@ function cacheState(now) {
     const detail = tokens >= HEAVY ? T.toRewrite(short(tokens)) : tokens >= COMPACT_AT ? `${T.toRewrite(short(tokens))} · /compact` : "";
     return { tone: "alert", value: T.expired, detail };
   }
-  const value = T.percent(hitOf(cache));
-  if (cache.cause) return { tone: "fast", value, detail: `${T.missed} · ${T.causes[cache.cause]}` };
+  const share = hitOf(cache);
+  if (cache.cause) return { tone: "fast", value: T.percent(share), detail: `${T.missed} · ${T.causes[cache.cause]}` };
   const time = left < MINUTE ? T.underMinute : duration(left);
-  return left < CACHE_SOON ? { tone: "fast", value, detail: time, urgent: true } : { tone: "calm", value, detail: time };
+  const soon = left < CACHE_SOON;
+  // A cache that served the message (90% or more) shows its time alone; below, the share first.
+  if (share >= GOOD_HIT) return { tone: soon ? "fast" : "calm", value: time, detail: "", urgent: soon };
+  return { tone: soon ? "fast" : "calm", value: T.percent(share), detail: time, urgent: soon };
 }
 
 // ---------- Agents ----------
@@ -655,6 +665,12 @@ function icon(Svg, key, name, color, alt, size = ICON_SIZE) {
   return Svg({ key, source, alt, width: size, height: size });
 }
 
+// The same, with a tooltip: an interactive drawing, in a frame of its own.
+function tipIcon(Svg, key, name, color, alt, title, size = ICON_SIZE) {
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24">${FRAME_SCHEME}<title>${escapeXml(title)}</title>${ICONS[name](color)}</svg>`;
+  return Svg({ key, source, alt, width: size, height: size, isInteractive: true });
+}
+
 function divider(Text, key) {
   return Text({ key, dimColor: true, children: SEP });
 }
@@ -669,7 +685,10 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
   if (mode === "text") parts.push(textGauge(Box, Text, g));
   parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
   // Terminal too narrow: the detail goes with the bar, leaving the label and the percentage.
-  if (g.when && mode === "svg") parts.push(divider(Text, "s"), icon(Svg, "i", "clock", color, T.icons.reset, SMALL_ICON), Text({ key: "d", dimColor: true, children: g.when }));
+  if (g.when && mode === "svg") {
+    const clock = g.resetAt ? tipIcon(Svg, "i", "clock", color, T.icons.reset, T.resetsAt(g.resetAt), SMALL_ICON) : icon(Svg, "i", "clock", color, T.icons.reset, SMALL_ICON);
+    parts.push(divider(Text, "s"), clock, Text({ key: "d", dimColor: true, children: g.when }));
+  }
   else if (g.when && mode === "text") parts.push(Text({ key: "d", dimColor: true, children: `· ${g.when}` }));
   return { key: "gauge-" + g.label, tint: TINTS[g.kind] ?? TINTS.spend_limit, parts };
 }
@@ -679,9 +698,11 @@ function cacheBlock({ Text, Svg }, mode, state) {
   if (mode === "svg") {
     parts.push(icon(Svg, "i", "bolt", ICON_COLORS[state.tone] ?? ICON_COLORS.calm, T.icons.cache));
   }
-  parts.push(Text({ key: "l", children: T.cache }));
+  // In the app the bolt says "cache"; the terminal keeps the word.
+  if (mode !== "svg") parts.push(Text({ key: "l", children: T.cache }));
   // A miss in yellow, an expired cache in red; while the time runs short, the time carries the color.
-  const valueColor = state.tone === "alert" ? TONES.alert.text : state.tone === "fast" && !state.urgent ? TONES.fast.text : undefined;
+  const valueColor =
+    state.tone === "alert" ? TONES.alert.text : state.tone === "fast" && (!state.urgent || !state.detail) ? TONES.fast.text : undefined;
   parts.push(Text(state.tone === "none" ? { key: "v", dimColor: true, children: state.value } : { key: "v", bold: true, ...(valueColor ? { color: valueColor } : {}), children: state.value }));
   if (state.detail && mode !== "none") {
     if (mode === "svg") parts.push(divider(Text, "s"));
@@ -786,13 +807,11 @@ function drawLine(elements, surface, columns, now) {
   const heavy = heavyState();
   if (heavy) {
     const parts = [];
-    if (desktop) parts.push(icon(Svg, "i", "heavy", ICON_COLORS[heavy.tone], T.icons.heavy));
-    parts.push(Text({ key: "l", children: T.heavy }));
+    // In the app the icon and its color say it, the advice sits in the tooltip.
+    if (desktop) parts.push(tipIcon(Svg, "i", "heavy", ICON_COLORS[heavy.tone], T.icons.heavy, T.heavyTip(heavy.times)));
+    else parts.push(Text({ key: "l", children: T.heavy }));
     parts.push(Text({ key: "v", bold: true, color: TONES[heavy.tone].text, children: heavy.times }));
-    if (mode !== "none") {
-      if (desktop) parts.push(divider(Text, "s"));
-      parts.push(Text({ key: "d", dimColor: true, children: desktop ? T.fresh : `· ${T.fresh}` }));
-    }
+    if (!desktop && mode !== "none") parts.push(Text({ key: "d", dimColor: true, children: `· ${T.fresh}` }));
     blocks.push({ key: "heavy", tint: TINTS[heavy.tone], parts });
   }
   // Agents last, shown only while some run: the blocks before them stay in place.
@@ -813,7 +832,8 @@ function drawLine(elements, surface, columns, now) {
     // Pills: tinted, outlined, side by side. The app rounds a Box only through its border, and
     // a border brings a padding that made the band taller than the prompt box: paddingY, set
     // after it, takes the vertical part back.
-    const pills = blocks.map((b) => Box({ ...row(b), paddingX: 1, paddingY: 0, borderStyle: "round", borderColor: b.tint[1], backgroundColor: b.tint[0] }));
+    // A pill never shrinks: squeezed, the app broke "24 %" over two lines.
+    const pills = blocks.map((b) => Box({ ...row(b), flexShrink: 0, paddingX: 1, paddingY: 0, borderStyle: "round", borderColor: b.tint[1], backgroundColor: b.tint[0] }));
     return Box({ flexDirection: "row", alignItems: "center", columnGap: 1, paddingX: 1, children: pills });
   }
   const children = [];

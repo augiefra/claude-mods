@@ -43,11 +43,13 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(texts).toContain("5h");
     expect(texts).toContain("32%");
     const dot = surface === "terminal" ? "· " : "";
-    expect(texts).toContain(`${dot}3h00 → ${at(NOW + 3 * 3_600_000)}`);
+    // The time left alone; the reset time is in the clock's tooltip.
+    expect(texts).toContain(`${dot}3h00`);
+    expect(texts).not.toContain(`${dot}3h00 → ${at(NOW + 3 * 3_600_000)}`);
     expect(texts).toContain("59%");
     expect(texts).toContain(`${dot}3d00h`);
-    // No request yet: the cache block waits, no cost without a ledger.
-    expect(texts).toContain("cache");
+    // No request yet: the cache block waits, no cost without a ledger. In the app the bolt stands for the word.
+    if (surface === "terminal") expect(texts).toContain("cache");
     expect(texts).toContain("—");
     if (surface === "desktop") {
       const svgs = (await ui.findAll({ type: "Svg" })) as any[];
@@ -181,7 +183,7 @@ test("narrow terminal: no bar, no detail", async ($, on) => {
   const { texts } = await band($, "terminal", 60);
   expect(texts).toContain("32%");
   expect(texts).not.toContain("━");
-  expect(texts).not.toContain(`· 3h00 → ${at(NOW + 3 * 3_600_000)}`);
+  expect(texts).not.toContain("· 3h00");
 });
 
 test("after a restart, the turn bars come back", async ($, on) => {
@@ -265,11 +267,12 @@ test("cache: share read and time left on a subscription (1 hour)", async ($, on)
   await step($, HIT);
   const { ui, texts } = await band($, "terminal");
   expect(texts).toContain("cache");
-  expect(texts).toContain("98%");
-  // 1 hour left, counted from the request's start.
-  expect(texts).toContain("· 1h00");
-  const time: any = await ui.find({ type: "Text", text: "· 1h00" });
-  expect(time?.props?.dimColor).toBe(true);
+  // 98% served: the time left alone (1 hour, counted from the request's start).
+  expect(texts).not.toContain("98%");
+  expect(texts).toContain("1h00");
+  const time: any = await ui.find({ type: "Text", text: "1h00" });
+  expect(time?.props?.bold).toBe(true);
+  expect(time?.props?.color).toBeUndefined();
 });
 
 test("cache: yellow under 10 minutes, then expired with /compact", async ($, on) => {
@@ -286,8 +289,8 @@ test("cache: yellow under 10 minutes, then expired with /compact", async ($, on)
   await step($, HIT);
   await (clock as any).advance(55 * 60_000);
   let { ui, texts } = await band($, "terminal");
-  expect(texts).toContain("· 5 min");
-  const soon: any = await ui.find({ type: "Text", text: "· 5 min" });
+  expect(texts).toContain("5 min");
+  const soon: any = await ui.find({ type: "Text", text: "5 min" });
   expect(soon?.props?.color).toBe("yellow");
   await (clock as any).advance(6 * 60_000);
   ({ ui, texts } = await band($, "terminal"));
@@ -317,7 +320,7 @@ test("cache: 5 minutes on an API key (no plan window)", async ($, on) => {
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   await step($, HIT);
   const { texts } = await band($, "terminal");
-  expect(texts).toContain("· 5 min");
+  expect(texts).toContain("5 min");
 });
 
 test("cost: shown in dollars, French format", async ($, on) => {
@@ -394,11 +397,18 @@ for (const surface of ["terminal", "desktop"] as const) {
     heavyWorld(on, 342_000, { baseline: { at: NOW, list: [120_000, 114_000] } });
     await $.session.start({ source: "resume", cwd: "/tmp" } as any);
     const { ui, texts } = await band($, surface);
-    expect(texts).toContain("heavy thread");
     expect(texts).toContain("×3");
     const times: any = await ui.find({ type: "Text", text: "×3" });
     expect(times?.props?.color).toBe("yellow");
-    expect(texts).toContain(surface === "terminal" ? "· start a new thread" : "start a new thread");
+    if (surface === "terminal") {
+      expect(texts).toContain("heavy thread");
+      expect(texts).toContain("· start a new thread");
+    } else {
+      // In the app: icon and number; the words and the advice sit in the tooltip.
+      expect(texts).not.toContain("heavy thread");
+      const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+      expect(svgs.some((s) => s.props?.isInteractive && String(s.props?.source).includes("Start a new thread"))).toBe(true);
+    }
   });
 }
 
@@ -466,4 +476,35 @@ test("last prompt: its share of the 5-hour limit next to its cost", async ($, on
   await ($ as any).turn.complete({ answer: "ok" } as any);
   const { texts } = await band($, "terminal");
   expect(texts).toContain("(+1,07 $ · +2,5 % 5h)");
+});
+
+test("cache: below 90% served, the share before the time", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  const PART = { ...HIT, cache_read_input_tokens: 72_000, cache_creation_input_tokens: 0, input_tokens: 28_000 };
+  engineStep(on, [PART]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, PART);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("72%");
+  expect(texts).toContain("· 1h00");
+});
+
+test("cost: no cents from 100 dollars", async ($, on) => {
+  world(on);
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS, cost: { usd: 134.69 } } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("≈ $135");
+});
+
+test("desktop: pills never shrink, and the 5-hour reset time sits in the clock's tooltip", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui } = await band($, "desktop");
+  const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor);
+  for (const p of pills) expect(p.props?.flexShrink).toBe(0);
+  const svgs = (await ui.findAll({ type: "Svg" })) as any[];
+  expect(svgs.some((s) => s.props?.isInteractive && String(s.props?.source).includes(`Resets at ${at(NOW + 3 * 3_600_000)}`))).toBe(true);
 });
