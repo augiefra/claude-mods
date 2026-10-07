@@ -235,8 +235,9 @@ let seenTtl = null;
 // at the input price minus the cache-read price.
 let savedUsd = 0;
 
-// Anthropic first-party list prices, USD per million tokens, as of 2026-09-25: input and cache
+// Anthropic first-party list prices, USD per million tokens, as of 2026-10-07: input and cache
 // read. Cache writes follow from input: 1.25× for the 5-minute lifetime, 2× for 1 hour.
+// "over" holds the prices of prompts above "at" tokens, for a model priced by prompt size.
 // Update this table, and its date, when the prices change. A model missing here shows tokens only.
 const PRICES = {
   "claude-fable-5-1": { input: 10, read: 0.25 },
@@ -247,9 +248,10 @@ const PRICES = {
   "claude-opus-4-8": { input: 5, read: 0.5 },
   "claude-opus-4-7": { input: 5, read: 0.5 },
   "claude-opus-4-6": { input: 5, read: 0.5 },
-  "claude-sonnet-5-5": { input: 2, read: 0.2 },
+  "claude-sonnet-5-5": { input: 2, read: 0.1 },
   "claude-sonnet-5": { input: 2, read: 0.2 },
   "claude-sonnet-4-6": { input: 3, read: 0.3 },
+  "claude-haiku-5-5": { input: 0.1, read: 0.01, over: { at: 100_000, input: 0.5, read: 0.05 } },
   "claude-haiku-4-5": { input: 1, read: 0.1 },
 };
 // Environment switches read at session start.
@@ -661,18 +663,21 @@ function recordRequest(at, usage, model) {
     else if (missed && gap > TTL["5m"] && gap < TTL["1h"] && cur.model === prev.model && promptOf(cur) >= promptOf(prev)) seenTtl = "5m";
     if (missed) cur.cause = cur.model !== prev.model ? "model" : gap >= ttlMs() ? "lapsed" : "prefix";
   }
-  const price = priceOf(cur.model);
+  const price = priceOf(cur.model, promptOf(cur));
   if (price) savedUsd += (cur.read * (price.input - price.read)) / 1e6;
   cache = cur;
 }
 
-// List prices of a model id: lowercase, without a "[1m]"-style suffix, a trailing date or a
-// provider prefix ("anthropic.", "us.anthropic.", ".../"); null when the table lacks it.
-function priceOf(model) {
+// List prices of a model id, for a prompt of that many tokens: lowercase, without a "[1m]"-style
+// suffix, a trailing date or a provider prefix ("anthropic.", "us.anthropic.", ".../"); null when
+// the table lacks it.
+function priceOf(model, tokens = 0) {
   let id = String(model ?? "").trim().toLowerCase();
   id = id.replace(/\[[^\]]*\]$/, "").replace(/-20\d{6}$/, "");
   id = id.slice(Math.max(id.lastIndexOf("."), id.lastIndexOf("/")) + 1);
-  return Object.prototype.hasOwnProperty.call(PRICES, id) ? PRICES[id] : null;
+  if (!Object.prototype.hasOwnProperty.call(PRICES, id)) return null;
+  const price = PRICES[id];
+  return price.over && tokens > price.over.at ? price.over : price;
 }
 
 // Price of a cache write, per million tokens, for the lifetime in use.
@@ -703,7 +708,7 @@ function cacheState(now) {
   const ttl = ttlMs();
   // In dollars, at list prices, for the context the next message reads: from the cache, and
   // written again once it lapsed. Null for a model missing from PRICES: tokens only.
-  const price = priceOf(cache.model);
+  const price = priceOf(cache.model, tokens);
   const costs = price ? { read: (tokens * price.read) / 1e6, rewrite: (tokens * writePrice(price, ttl)) / 1e6 } : null;
   // Expired: say what the next message writes again, and the way out: from 300k a new thread
   // (it avoids rewriting the whole context at full price), from 100k /compact. In the app the

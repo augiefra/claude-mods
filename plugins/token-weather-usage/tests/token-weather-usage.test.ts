@@ -316,10 +316,13 @@ function engineStep(on: any, usages: Record<string, unknown>[]) {
 const HIT = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 98_000, cache_creation_input_tokens: 1_700, output_tokens: 500 };
 const MISS = { model: "claude-opus-5-5", input_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 99_700, output_tokens: 500 };
 
-// The mod's list prices for the models used here, USD per million tokens (Anthropic, 2026-09-25).
+// The mod's list prices for the models used here, USD per million tokens (Anthropic, 2026-10-07).
+// Haiku 5.5 costs 5× more past 100k tokens of prompt.
 const PRICE: Record<string, { input: number; read: number }> = {
   "claude-opus-5-5": { input: 4, read: 0.2 },
-  "claude-sonnet-5-5": { input: 2, read: 0.2 },
+  "claude-sonnet-5-5": { input: 2, read: 0.1 },
+  "claude-haiku-5-5": { input: 0.1, read: 0.01 },
+  "claude-haiku-5-5 over 100k": { input: 0.5, read: 0.05 },
   "claude-haiku-4-5": { input: 1, read: 0.1 },
 };
 // LIMITS means a subscription within its plan: the 1-hour lifetime, whose cache writes cost 2× input.
@@ -405,6 +408,27 @@ test("cache: a miss after a model change names the cause", async ($, on) => {
   expect(await boltTip(desktop.ui)).toBe(
     `This message read only 0% from the cache (model changed): it wrote 99.7k tokens again, ≈ ${en$(surcharge)} more than a message served by the cache.`,
   );
+});
+
+test("cache: Haiku 5.5 priced by prompt size", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, {});
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  withUsage(on, LIMITS);
+  const haiku = { ...HIT, model: "claude-haiku-5-5" };
+  engineStep(on, [haiku]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, haiku, "claude-haiku-5-5");
+  await (clock as any).advance(55 * 60_000);
+  // The 107k context is past 100k: written again at the higher price.
+  const over = "claude-haiku-5-5 over 100k";
+  const { texts } = await band($, "desktop");
+  expect(texts).toContain(`${en$(rewriteCost(107_000, over))} at stake`);
+  expect(texts).not.toContain(`${en$(rewriteCost(107_000, "claude-haiku-5-5"))} at stake`);
 });
 
 test("cache: 5 minutes on an API key (no plan window)", async ($, on) => {
