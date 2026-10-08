@@ -157,6 +157,18 @@ test("auto: LC_ALL comes before LANG", async ($, on) => {
   expect(texts).toContain("7j");
 });
 
+test("auto: Russian when LANG is Russian", async ($, on) => {
+  world(on, { LANG: "ru_RU.UTF-8" });
+  withUsage(on, LIMITS);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("107k");
+  expect(texts).toContain("5ч");
+  expect(texts).toContain("7д");
+  expect(texts).toContain("· 3д00ч");
+  expect(texts).toContain("кэш");
+});
+
 test("auto: English when LANG is another language", async ($, on) => {
   world(on, { LANG: "de_DE.UTF-8" });
   withUsage(on, LIMITS);

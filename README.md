@@ -44,7 +44,7 @@ When the line does not fit the terminal, the bars, details and cost drop out, le
 
 ### Language
 
-Labels are in English or French. By default (`auto`) the mod follows `LC_ALL`, `LC_MESSAGES` or `LANG` and falls back to English. The desktop app often sets none of them: pick `en` or `fr` in the plugin's **Language** option in `/config`.
+Labels are in English, French or Russian. By default (`auto`) the mod follows `LC_ALL`, `LC_MESSAGES` or `LANG` and falls back to English. The desktop app often sets none of them: pick `en`, `fr` or `ru` in the plugin's **Language** option in `/config`.
 
 ### Install
 
