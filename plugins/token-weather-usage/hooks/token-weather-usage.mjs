@@ -1,7 +1,8 @@
 // Token Weather Usage: one line above the prompt.
 //   Terminal, blocks split by a thin rule:
 //   ☁ 440k ▃▄▂▇▆ ▲ +8.4k │ 5h ━━╍╍── 37% · 2h22 │ 7d ━━━╍── 60% · 2d23h │ cache 52 min │ ≈ $4.32 (+$0.84 · +2% 5h) │ 2 agents
-//   Desktop app: the same blocks as tinted, outlined pills.
+//   Desktop app: the same blocks as tinted, outlined pills; the cost pill keeps the total (the last
+//   prompt in its card) and the agents pill stays, its card splitting the cost by model and effort.
 //
 // Weather, context and recent turns: adapted from the Token Weather example,
 //   Copyright 2026 Anthropic PBC, SPDX-License-Identifier: Apache-2.0 (claude-code-playground).
@@ -58,7 +59,27 @@ const TEXT = {
       compacted: "Compacted: the next message writes a new, smaller cache.",
     },
     agents: (n) => (n === 1 ? "1 agent" : `${n} agents`),
-    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents running" },
+    agentsRunning: (running, n) => `${running} running · ${n}`,
+    // The cost pill's card in the app.
+    costTips: {
+      total: (usd) => `Thread cost ${usd}`,
+      plan: "At API prices: a subscription is not billed per token, this counts toward its limits.",
+      api: "At API list prices.",
+      last: (what) => `Last prompt: ${what}`,
+    },
+    // The agents pill's card: who spent what, by model and effort.
+    team: {
+      title: (n, running) => `Agents in this thread: ${n}${running ? ` (${running} running)` : ""}`,
+      line: (label, usd, share) => `${label}: ${usd}${share ? ` · ${share}` : ""}`,
+      main: (model) => `${model} · main thread`,
+      group: (model, n) => `${model} · ${n === 1 ? "1 agent" : `${n} agents`}`,
+      detail: (efforts, tokens) => `  ${efforts ? `effort ${efforts} · ` : ""}${tokens} tokens`,
+      efforts: { low: "low", medium: "medium", high: "high", xhigh: "extra high", max: "max" },
+      none: "No subagent in this thread yet.",
+      running: (model, description, time) => `Running: ${model} · “${description}” · ${time}`,
+      saved: (usd, model) => `Delegating: ${usd} saved compared with ${model}.`,
+    },
+    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents" },
   },
   fr: {
     weather: { clear: "Clair", cloudy: "Nuageux", showers: "Averses", storm: "Orage", compact: "Compacter bientôt" },
@@ -97,7 +118,25 @@ const TEXT = {
       compacted: "Compacté : le prochain message écrira un cache neuf, plus petit.",
     },
     agents: (n) => (n === 1 ? "1 agent" : `${n} agents`),
-    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents en cours" },
+    agentsRunning: (running, n) => `${running} en cours · ${n}`,
+    costTips: {
+      total: (usd) => `Coût du fil ${usd}`,
+      plan: "Au prix de l'API : un abonnement n'est pas facturé au token, cela compte dans ses limites.",
+      api: "Au prix catalogue de l'API.",
+      last: (what) => `Dernier message : ${what}`,
+    },
+    team: {
+      title: (n, running) => `Agents du fil : ${n}${running ? ` (${running} en cours)` : ""}`,
+      line: (label, usd, share) => `${label} : ${usd}${share ? ` · ${share}` : ""}`,
+      main: (model) => `${model} · fil principal`,
+      group: (model, n) => `${model} · ${n === 1 ? "1 agent" : `${n} agents`}`,
+      detail: (efforts, tokens) => `  ${efforts ? `effort ${efforts} · ` : ""}${tokens} tokens`,
+      efforts: { low: "bas", medium: "moyen", high: "élevé", xhigh: "très élevé", max: "max" },
+      none: "Aucun sous-agent dans ce fil.",
+      running: (model, description, time) => `En cours : ${model} · « ${description} » · ${time}`,
+      saved: (usd, model) => `Délégation : ${usd} économisés par rapport à ${model}.`,
+    },
+    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents" },
   },
 };
 let T = TEXT.en;
@@ -167,7 +206,8 @@ function hoverCard(Box, Text, tip) {
     borderStyle: "round",
     borderColor: CARD.line,
     backgroundColor: CARD.back,
-    children: lines.map((line, i) => Text({ key: "t" + i, children: line })),
+    // An indented line is a detail of the one above it: dim.
+    children: lines.map((line, i) => Text(line.startsWith("  ") ? { key: "t" + i, dimColor: true, children: line } : { key: "t" + i, children: line })),
   });
 }
 
@@ -235,8 +275,9 @@ let seenTtl = null;
 // at the input price minus the cache-read price.
 let savedUsd = 0;
 
-// Anthropic first-party list prices, USD per million tokens, as of 2026-10-07: input and cache
-// read. Cache writes follow from input: 1.25× for the 5-minute lifetime, 2× for 1 hour.
+// Anthropic first-party list prices, USD per million tokens, as of 2026-10-08: input and cache
+// read. Cache writes follow from input: 1.25× for the 5-minute lifetime, 2× for 1 hour; output
+// is 5× input for every model here (OUTPUT).
 // "over" holds the prices of prompts above "at" tokens, for a model priced by prompt size.
 // Update this table, and its date, when the prices change. A model missing here shows tokens only.
 const PRICES = {
@@ -254,6 +295,7 @@ const PRICES = {
   "claude-haiku-5-5": { input: 0.1, read: 0.01, over: { at: 100_000, input: 0.5, read: 0.05 } },
   "claude-haiku-4-5": { input: 1, read: 0.1 },
 };
+const OUTPUT = 5;
 // Environment switches read at session start.
 let cacheEnv = {};
 let cacheTicker = null;
@@ -272,6 +314,9 @@ let promptBase5h = null;
 // Subagents running now: { id, description, type }.
 let agents = [];
 let agentsKey = "";
+// Every subagent this thread ran, by id: { model, effort, usd, priced, input, read, write, output,
+// at, description, type }. Its requests are counted at list prices as they come back.
+let team = {};
 
 // ---------- Layout ----------
 
@@ -341,6 +386,7 @@ export function register(on, options) {
     compacted = false;
     seenTtl = null;
     savedUsd = 0;
+    team = {};
     lastPrompt = null;
     lastPrompt5h = null;
     cacheKey = "";
@@ -355,6 +401,7 @@ export function register(on, options) {
     agents = [];
     agentsKey = "";
     await refreshAgents($);
+    nameTeam();
     // On start or reload the local reading may be stale (an idle session): the shared reading
     // wins, and the local one is published only when none exists yet.
     await adoptShared($);
@@ -388,8 +435,14 @@ export function register(on, options) {
   });
 
   // Each main-loop request: how much of its prompt the cache served (subagents have their own).
+  // A subagent's request goes to its line in the agents card: model, effort, tokens, cost.
   on("turn.step", async function* ($, e, next) {
-    if (e.agentId) return yield* next(e);
+    if (e.agentId) {
+      const at = await $.clock.now();
+      const result = yield* next(e);
+      if (result?.usage) recordAgentStep(e.agentId, at, result.usage, e.model, e.effort);
+      return result;
+    }
     const at = await $.clock.now();
     const result = yield* next(e);
     if (result?.usage) {
@@ -406,7 +459,10 @@ export function register(on, options) {
     const result = await next(e);
     // A subagent's turn: it may have just finished.
     if (e.agentId) {
-      if (await refreshAgents($)) $.ui.invalidate("ui.render");
+      await refreshAgents($);
+      nameTeam();
+      await saveTurns($);
+      $.ui.invalidate("ui.render");
       return result;
     }
     try {
@@ -508,6 +564,7 @@ async function restoreTurns($) {
         if (Number.isFinite(saved.saved) && saved.saved >= 0) savedUsd = saved.saved;
         if (Number.isFinite(saved.lastPrompt)) lastPrompt = saved.lastPrompt;
         if (Number.isFinite(saved.lastPrompt5h)) lastPrompt5h = saved.lastPrompt5h;
+        if (saved.team && typeof saved.team === "object") team = saved.team;
       } else if (!saved || !(now - saved.at < TURNS_KEEP_MS)) await $.store.delete(key);
     }
   } catch {
@@ -518,7 +575,7 @@ async function restoreTurns($) {
 async function saveTurns($) {
   if (!turnsKey) return;
   try {
-    await $.store.set(turnsKey, { at: await $.clock.now(), readings, cache, compacted, seenTtl, saved: savedUsd, lastPrompt, lastPrompt5h });
+    await $.store.set(turnsKey, { at: await $.clock.now(), readings, cache, compacted, seenTtl, saved: savedUsd, lastPrompt, lastPrompt5h, team });
   } catch {
     // Not saved this turn: the bars come back on the next one.
   }
@@ -753,6 +810,9 @@ function cacheState(now) {
 
 // ---------- Agents ----------
 
+// Every agent $.agent.list() returned last: it names the team's entries.
+let listed = [];
+
 // Reads the subagents running now; true when the list changed.
 async function refreshAgents($) {
   let list = [];
@@ -761,12 +821,113 @@ async function refreshAgents($) {
   } catch {
     return false;
   }
-  const running = (list ?? []).filter((a) => a && a.status === "running").map((a) => ({ id: a.id, type: a.type ?? "", description: a.description ?? "" }));
+  listed = (list ?? []).filter((a) => a && a.id);
+  const running = listed.filter((a) => a.status === "running").map((a) => ({ id: a.id, type: a.type ?? "", description: a.description ?? "" }));
   const key = running.map((a) => a.id).join(",");
   if (key === agentsKey) return false;
   agentsKey = key;
   agents = running;
   return true;
+}
+
+// One subagent request: its tokens, and their cost at list prices (Haiku 5.5's by the request's
+// prompt size). Subagents write the 5-minute cache (assumed). A model missing from PRICES counts
+// tokens only.
+function recordAgentStep(id, at, usage, model, effort) {
+  const a = (team[id] ??= { model: "", effort: null, usd: 0, priced: true, input: 0, read: 0, write: 0, output: 0, at, description: "", type: "" });
+  const u = { input: usage.input_tokens ?? 0, read: usage.cache_read_input_tokens ?? 0, write: usage.cache_creation_input_tokens ?? 0, output: usage.output_tokens ?? 0 };
+  a.model = usage.model || model || a.model;
+  if (effort !== undefined && effort !== null) a.effort = effort;
+  for (const k of ["input", "read", "write", "output"]) a[k] += u[k];
+  const price = priceOf(a.model, u.input + u.read + u.write);
+  if (price) a.usd += requestCost(price, u, TTL["5m"]);
+  else a.priced = false;
+}
+
+// What one request cost: its fresh input, cache reads, cache writes and output.
+function requestCost(price, u, ttl) {
+  return (u.input * price.input + u.read * price.read + u.write * writePrice(price, ttl) + u.output * OUTPUT * price.input) / 1e6;
+}
+
+// The description and type of each agent the list still holds.
+function nameTeam() {
+  for (const a of listed) {
+    const t = team[a.id];
+    if (!t) continue;
+    if (a.description) t.description = a.description;
+    if (a.type) t.type = a.type;
+  }
+}
+
+// "claude-haiku-5-5" → "Haiku 5.5"; an id it cannot read stays as it is.
+function modelName(model) {
+  let id = String(model ?? "").trim().toLowerCase().replace(/\[[^\]]*\]$/, "").replace(/-20\d{6}$/, "");
+  id = id.slice(Math.max(id.lastIndexOf("."), id.lastIndexOf("/")) + 1);
+  const m = /^claude-([a-z]+)-(\d+(?:-\d+)*)$/.exec(id);
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2].replace(/-/g, ".")}` : String(model ?? "");
+}
+
+// A share of the thread's cost, "> 99%" and "< 1%" at the ends.
+function shareOf(usd, total) {
+  if (!(total > 0)) return "";
+  const pct = (usd / total) * 100;
+  return T.percent(pct < 1 ? "< 1" : pct > 99 ? "> 99" : Math.round(pct));
+}
+
+// Agents in this thread: those counted and those running that have not answered yet.
+function teamSize() {
+  const ids = new Set(Object.keys(team));
+  for (const a of agents) ids.add(a.id);
+  return ids.size;
+}
+
+// The agents pill's card: the main thread's share, then each model's agents with their efforts
+// and tokens, the agents still running, and what delegating saved against the main thread's model.
+function teamTip(now) {
+  const list = Object.values(team);
+  const lines = [T.team.title(teamSize(), agents.length)];
+  const agentsUsd = list.reduce((sum, a) => sum + (a.priced ? a.usd : 0), 0);
+  const mainModel = cache?.model ?? "";
+  // The main thread: the session's cost less its agents' (its own requests are not all seen here).
+  if (cost !== null) {
+    const mainUsd = Math.max(0, cost - agentsUsd);
+    lines.push(T.team.line(T.team.main(modelName(mainModel) || "Claude"), approx(mainUsd), shareOf(mainUsd, cost)));
+  }
+  const groups = new Map();
+  for (const a of list) {
+    const g = groups.get(a.model) ?? { n: 0, usd: 0, priced: true, tokens: 0, efforts: new Map() };
+    g.n++;
+    g.usd += a.usd;
+    g.priced &&= a.priced;
+    g.tokens += a.input + a.read + a.write + a.output;
+    if (a.effort !== null && a.effort !== undefined) {
+      const e = T.team.efforts[a.effort] ?? String(a.effort);
+      g.efforts.set(e, (g.efforts.get(e) ?? 0) + 1);
+    }
+    groups.set(a.model, g);
+  }
+  for (const [model, g] of [...groups].sort((x, y) => y[1].usd - x[1].usd)) {
+    const label = T.team.group(modelName(model), g.n);
+    lines.push(g.priced ? T.team.line(label, approx(g.usd), cost !== null ? shareOf(g.usd, cost) : "") : label);
+    lines.push(T.team.detail([...g.efforts].map(([e, n]) => `${e} ×${n}`).join(" · "), short(g.tokens)));
+  }
+  if (list.length === 0 && agents.length === 0) lines.push(T.team.none);
+  for (const r of agents) {
+    const a = team[r.id];
+    lines.push(T.team.running(modelName(a?.model) || r.type, r.description, a && now - a.at >= MINUTE ? duration(now - a.at) : T.underMinute));
+  }
+  // The same tokens at the main thread's prices, for the agents on a cheaper model.
+  const main = priceOf(mainModel, 0);
+  if (main) {
+    let saved = 0;
+    for (const a of list) {
+      if (!a.priced || a.model === mainModel) continue;
+      const ref = requestCost(main, a, TTL["5m"]);
+      if (ref > a.usd) saved += ref - a.usd;
+    }
+    if (saved >= 0.01) lines.push(T.team.saved(approx(saved), modelName(mainModel)));
+  }
+  return lines.join("\n");
 }
 
 // The cache block as the terminal writes it: "cache 8 min · $2.32 at stake".
@@ -911,21 +1072,26 @@ function drawLine(elements, surface, columns, now) {
   // The cost goes first when the terminal is short of room.
   if (cost !== null && cost >= 0.005 && mode !== "none") {
     const parts = [Text({ key: "v", bold: true, children: T.cost(cost) })];
-    if (desktop) parts.unshift(icon(Svg, "i", "coin", ICON_COLORS.cost, T.icons.cost));
     const share = lastPromptText();
-    if (share) {
-      if (desktop) parts.push(divider(Text, "s"), icon(Svg, "p", "prompt", ICON_COLORS.cost, T.icons.lastPrompt, SMALL_ICON));
-      parts.push(Text({ key: "d", dimColor: true, children: desktop ? share : `(${share})` }));
+    if (desktop) {
+      // The app keeps the total; the last prompt goes to the card.
+      parts.unshift(icon(Svg, "i", "coin", ICON_COLORS.cost, T.icons.cost));
+      const tip = [T.costTips.total(T.cost(cost)), limits.list.length > 0 ? T.costTips.plan : T.costTips.api];
+      if (share) tip.push(T.costTips.last(share));
+      blocks.push({ key: "cost", tint: TINTS.cost, parts, tip: tip.join("\n") });
+    } else {
+      if (share) parts.push(Text({ key: "d", dimColor: true, children: `(${share})` }));
+      blocks.push({ key: "cost", tint: TINTS.cost, parts });
     }
-    blocks.push({ key: "cost", tint: TINTS.cost, parts });
   }
-  // Agents last, shown only while some run: the blocks before them stay in place.
-  if (agents.length > 0) {
+  // Agents last. In the app the pill stays, its card splitting the cost by model and effort; in
+  // the terminal the count shows once the thread has run one.
+  const crew = teamSize();
+  if (desktop || crew > 0) {
     const parts = [];
     if (desktop) parts.push(icon(Svg, "i", "agents", ICON_COLORS.agents, T.icons.agents));
-    parts.push(Text({ key: "v", bold: true, children: T.agents(agents.length) }));
-    // The hover card lists what each one is doing.
-    blocks.push({ key: "agents", tint: TINTS.agents, parts, tip: agents.map((a) => `${a.type} · ${a.description}`).join("\n") });
+    parts.push(Text({ key: "v", bold: true, children: agentsText(crew, desktop) }));
+    blocks.push({ key: "agents", tint: TINTS.agents, parts, tip: desktop ? teamTip(now) : "" });
   }
 
   const row = (b) => ({ key: b.key, flexDirection: "row", columnGap: 1, alignItems: "center", children: b.parts });
@@ -978,11 +1144,17 @@ function textWidth(gauges, cacheNow) {
     width += T.cost(cost).length + (share ? 3 + share.length : 0);
     blocks++;
   }
-  if (agents.length > 0) {
-    width += T.agents(agents.length).length;
+  if (teamSize() > 0) {
+    width += agentsText(teamSize(), false).length;
     blocks++;
   }
   return width + 3 * Math.max(0, blocks - 1) + 2;
+}
+
+// The agents pill: "2 running · 7" while some run; otherwise "7" in the app, "7 agents" in the terminal.
+function agentsText(n, desktop) {
+  if (agents.length > 0) return T.agentsRunning(agents.length, n);
+  return desktop ? String(n) : T.agents(n);
 }
 
 // True for a tree with nothing to show: nothing, empty text, or nested empty boxes and texts.

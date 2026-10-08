@@ -106,7 +106,8 @@ for (const surface of ["terminal", "desktop"] as const) {
       }
       // Pills: tinted and rounded, without the border's vertical padding.
       const pills = ((await ui.findAll({ type: "Box" })) as any[]).filter((b) => b.props?.backgroundColor && b.props?.position !== "absolute");
-      expect(pills.length).toBe(4);
+      // Context, 5 hours, 7 days, cache, and the agents pill, which stays in the app.
+      expect(pills.length).toBe(5);
       for (const p of pills) {
         expect(p.props?.borderStyle).toBe("round");
         expect(p.props?.paddingY).toBe(0);
@@ -455,7 +456,7 @@ test("cost: shown in dollars, French format", async ($, on) => {
   }
 });
 
-test("cost: the last prompt's share next to the total", async ($, on) => {
+test("cost: the last prompt's share, next to the total in the terminal, in the card in the app", async ($, on) => {
   world(on);
   on("turn.complete", () => ({ text: "" }));
   const costs = [4.0, 4.84];
@@ -467,9 +468,11 @@ test("cost: the last prompt's share next to the total", async ($, on) => {
   expect(terminal.texts).toContain("≈ $4.84");
   expect(terminal.texts).toContain("(+$0.84)");
   const desktop = await band($, "desktop");
-  expect(desktop.texts).toContain("+$0.84");
-  const svgs = (await desktop.ui.findAll({ type: "Svg" })) as any[];
-  expect(svgs.some((s) => s.props?.alt === "Last prompt")).toBe(true);
+  expect(desktop.texts).toContain("≈ $4.84");
+  expect(desktop.texts).not.toContain("+$0.84");
+  expect(await cardOf(desktop.ui, "cost")).toBe(
+    "Thread cost ≈ $4.84\nAt API prices: a subscription is not billed per token, this counts toward its limits.\nLast prompt: +$0.84",
+  );
 });
 
 test("agents: a pill while subagents run, gone once they finish", async ($, on) => {
@@ -484,15 +487,70 @@ test("agents: a pill while subagents run, gone once they finish", async ($, on) 
   on("turn.complete", () => ({ text: "" }));
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   const desktop = await band($, "desktop");
-  expect(desktop.texts).toContain("2 agents");
-  expect(String(await cardOf(desktop.ui, "agents"))).toContain("Plan · Review the diff");
+  expect(desktop.texts).toContain("2 running · 2");
+  const card = String(await cardOf(desktop.ui, "agents"));
+  expect(card).toContain("Agents in this thread: 2 (2 running)");
+  expect(card).toContain("Running: Plan · “Review the diff” · < 1 min");
+  expect((await band($, "terminal")).texts).toContain("2 running · 2");
   list = list.map((a) => ({ ...a, status: "completed" }));
   await ($ as any).turn.complete({ answer: "ok", agentId: "a1" } as any);
+  // None ran a request: the terminal drops the block, the app keeps the pill at 0.
   const after = await band($, "terminal");
-  expect(after.texts.some((t: string) => t.includes("agent"))).toBe(false);
+  expect(after.texts.some((t: string) => t.includes("agent") || t.includes("running"))).toBe(false);
+  const app = await band($, "desktop");
+  expect(app.texts).toContain("0");
+  expect(await cardOf(app.ui, "agents")).toBe("Agents in this thread: 0\nNo subagent in this thread yet.");
 });
 
-test("desktop icons: gauge and speech bubble centred at y=12", async ($, on) => {
+test("agents: the card splits the cost by model and effort, and what delegating saved", async ($, on) => {
+  world(on);
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS, cost: { usd: 10 } } }));
+  on("agent.list", () => ({
+    value: [
+      { id: "h1", description: "List the files", type: "Explore", status: "completed" },
+      { id: "h2", description: "Check the captures", type: "general-purpose", status: "completed" },
+      { id: "s1", description: "Sum up the README", type: "general-purpose", status: "completed" },
+    ],
+  }));
+  on("turn.complete", () => ({ text: "" }));
+  // 98k tokens a request, under Haiku 5.5's 100k threshold.
+  const work = { input_tokens: 2_000, cache_read_input_tokens: 70_000, cache_creation_input_tokens: 6_000, output_tokens: 20_000 };
+  engineStep(on, [HIT, { ...work, model: "claude-haiku-5-5" }, { ...work, model: "claude-haiku-5-5" }, { ...work, model: "claude-sonnet-5-5" }]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  await step($, HIT);
+  for (const [agentId, model, effort] of [["h1", "claude-haiku-5-5", "medium"], ["h2", "claude-haiku-5-5", "high"], ["s1", "claude-sonnet-5-5", "high"]]) {
+    const stream = ($ as any).turn.step({ turnId: "t", index: 0, model, effort, agentId, messageCount: 2 });
+    for await (const _ of stream) {
+    }
+    await ($ as any).turn.complete({ answer: "ok", agentId } as any);
+  }
+  // Each request at list prices: fresh input, cache reads, 5-minute cache writes, output at 5× input.
+  const cost = (p: { input: number; read: number }) => (2_000 * p.input + 70_000 * p.read + 6_000 * 1.25 * p.input + 20_000 * 5 * p.input) / 1e6;
+  const haiku = 2 * cost(PRICE["claude-haiku-5-5"]);
+  const sonnet = cost(PRICE["claude-sonnet-5-5"]);
+  const saved = 3 * cost(PRICE["claude-opus-5-5"]) - haiku - sonnet;
+  const { ui, texts } = await band($, "desktop");
+  expect(texts).toContain("3");
+  expect(await cardOf(ui, "agents")).toBe(
+    [
+      "Agents in this thread: 3",
+      `Opus 5.5 · main thread: ≈ ${en$(10 - haiku - sonnet)} · 98%`,
+      `Sonnet 5.5 · 1 agent: ≈ ${en$(sonnet)} · 2%`,
+      "  effort high ×1 · 98k tokens",
+      `Haiku 5.5 · 2 agents: ≈ ${en$(haiku)} · < 1%`,
+      "  effort medium ×1 · high ×1 · 196k tokens",
+      `Delegating: ≈ ${en$(saved)} saved compared with Opus 5.5.`,
+    ].join("\n"),
+  );
+  // The detail lines are dim.
+  const detail: any = await ui.find({ type: "Text", text: "  effort high ×1 · 98k tokens" });
+  expect(detail?.props?.dimColor).toBe(true);
+  // Kept in the store: a resumed thread finds its agents again.
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  expect(String(await cardOf((await band($, "desktop")).ui, "agents"))).toContain("Haiku 5.5 · 2 agents");
+});
+
+test("desktop icons: gauge centred at y=12", async ($, on) => {
   world(on);
   on("turn.complete", () => ({ text: "" }));
   const costs = [4.0, 4.84];
@@ -504,7 +562,6 @@ test("desktop icons: gauge and speech bubble centred at y=12", async ($, on) => 
   const svgs = (await ui.findAll({ type: "Svg" })) as any[];
   const source = (alt: string) => String(svgs.find((s) => s.props?.alt === alt)?.props?.source);
   expect(source("5-hour limit")).toContain('<g transform="translate(0 0.5)"><path d="M3.6 18.5');
-  expect(source("Last prompt")).toContain('<g transform="translate(0 0.5)"><path d="M4 5.5');
 });
 
 test("cache expired from 300k: what gets written again, and a new thread", async ($, on) => {
