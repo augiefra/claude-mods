@@ -16,8 +16,8 @@
 
 // ---------- Language ----------
 
-// Labels in English or French. "auto" follows LC_ALL, LC_MESSAGES or LANG, then the runtime's
-// locale; English unless one of them starts with "fr". The desktop app often sets none of
+// Labels in English, French or Russian. "auto" follows LC_ALL, LC_MESSAGES or LANG, then the runtime's
+// locale; English unless one of them starts with "fr" or "ru". The desktop app often sets none of
 // them, so the language option (/config) is the sure way to pick.
 const TEXT = {
   en: {
@@ -25,6 +25,8 @@ const TEXT = {
     percent: (n) => `${n}%`,
     labels: { five_hour: "5h", seven_day: "7d", spend_limit: "$" },
     day: "d",
+    hour: "h",
+    minute: "min",
     contextAlt: (word, percent, window) => `${word} · ${percent} of ${window}`,
     turnsAlt: (n) => `Tokens added by the last ${n} prompts`,
     gaugeAlt: (label, value) => `${label}: ${value} used`,
@@ -86,6 +88,8 @@ const TEXT = {
     percent: (n) => `${n} %`,
     labels: { five_hour: "5h", seven_day: "7j", spend_limit: "$" },
     day: "j",
+    hour: "h",
+    minute: "min",
     contextAlt: (word, percent, window) => `${word} · ${percent} de ${window}`,
     turnsAlt: (n) => `Tokens ajoutés par les ${n} derniers prompts`,
     gaugeAlt: (label, value) => `${label} : ${value} consommés`,
@@ -138,8 +142,76 @@ const TEXT = {
     },
     icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents" },
   },
+  ru: {
+    weather: { clear: "Ясно", cloudy: "Облачно", showers: "Ливни", storm: "Гроза", compact: "Скоро сжатие" },
+    percent: (n) => `${n}%`,
+    labels: { five_hour: "5ч", seven_day: "7д", spend_limit: "$" },
+    day: "д",
+    hour: "ч",
+    minute: "мин",
+    contextAlt: (word, percent, window) => `${word} · ${percent} из ${window}`,
+    turnsAlt: (n) => `Токены, добавленные последними промптами: ${n}`,
+    gaugeAlt: (label, value) => `${label}: израсходовано ${value}`,
+    cache: "кэш",
+    expired: "истёк",
+    compacted: "сжат",
+    missed: "промах",
+    causes: { model: "смена модели", lapsed: "истёк срок", prefix: "изменилось начало" },
+    underMinute: "< 1 мин",
+    cost: (usd) => (usd >= 100 ? `≈ ${Math.round(usd)} $` : `≈ ${usd.toFixed(2).replace(".", ",")} $`),
+    resetsAt: (time) => `Сброс в ${time}`,
+    lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
+    lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")}% 5ч`,
+    toRewrite: (tokens) => `${tokens} к перезаписи`,
+    newThread: "новый тред",
+    money: (usd) => (usd < 0.01 ? "< 0,01 $" : `${amount(usd).replace(".", ",")} $`),
+    atStake: (what) => `под угрозой ${what}`,
+    tips: {
+      warm: (time, oneHour, observed) => `Кэш тёплый до ${time} (срок жизни ${oneHour ? "1 час" : "5 минут"}, ${observed ? "замерен" : "предполагается"}).`,
+      lastRead: (share, tokens) => `Последнее сообщение: ${share} прочитано из кэша (${tokens}).`,
+      costs: (read, rewrite) => `Чтение контекста: ${read} за сообщение. Если кэш истечёт: ${rewrite} на повторную запись.`,
+      saved: (usd) => `Этот тред: кэш сэкономил ${usd}.`,
+      soon: (time, tokens, costs) =>
+        `Кэш истекает в ${time}. Отправь следующее сообщение до этого, иначе ${tokens} токенов запишутся заново${costs ? ` (${costs.rewrite} вместо ${costs.read})` : ""}.`,
+      expired: (tokens, cost) => `Следующее сообщение заново запишет весь контекст (${tokens}) по полной цене${cost ? `, ${cost}` : ""}.`,
+      compact: "Сделай /compact перед продолжением: перезаписываемый контекст будет меньше.",
+      newThread: "Новый тред избавит от перезаписи; сжатие прочитает всё заново.",
+      missed: (share, cause, tokens, surcharge) =>
+        `Это сообщение прочитало из кэша только ${share} (${cause}): ${tokens} токенов записаны заново${surcharge ? `, на ${surcharge} дороже, чем сообщение из кэша` : ""}.`,
+      compacted: "Сжато: следующее сообщение запишет новый, меньший кэш.",
+    },
+    agents: (n) => `${n} ${plural(n, "агент", "агента", "агентов")}`,
+    agentsRunning: (running, n) => `${running} в работе · ${n}`,
+    costTips: {
+      total: (usd) => `Стоимость треда ${usd}`,
+      plan: "По ценам API: подписка не тарифицируется по токенам, это идёт в зачёт её лимитов.",
+      api: "По прайсовым ценам API.",
+      last: (what) => `Последний промпт: ${what}`,
+    },
+    team: {
+      title: (n, running) => `Агенты в треде: ${n}${running ? ` (в работе: ${running})` : ""}`,
+      line: (label, usd, share) => `${label}: ${usd}${share ? ` · ${share}` : ""}`,
+      main: (model) => `${model} · основной тред`,
+      group: (model, n) => `${model} · ${n} ${plural(n, "агент", "агента", "агентов")}`,
+      detail: (efforts, tokens) => `  ${efforts ? `усилие ${efforts} · ` : ""}${tokens} токенов`,
+      efforts: { low: "низкое", medium: "среднее", high: "высокое", xhigh: "очень высокое", max: "макс." },
+      none: "В этом треде пока нет субагентов.",
+      running: (model, description, time) => `В работе: ${model} · «${description}» · ${time}`,
+      saved: (usd, model) => `Делегирование: сэкономлено ${usd} по сравнению с ${model}.`,
+    },
+    icons: { five_hour: "Лимит на 5 часов", seven_day: "Лимит на 7 дней", spend_limit: "Лимит расходов", reset: "Сброс через", cache: "Кэш промпта", cost: "Стоимость сессии", lastPrompt: "Последний промпт", agents: "Агенты" },
+  },
 };
 let T = TEXT.en;
+
+// Russian plural: 1 агент, 2 агента, 5 агентов.
+function plural(n, one, few, many) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
 
 // 2.32, or 182 from 100 dollars (cents dropped).
 function amount(usd) {
@@ -528,9 +600,9 @@ export function register(on, options) {
   });
 }
 
-// "en" or "fr": the language option when it names one, otherwise the environment's locale.
+// "en", "fr" or "ru": the language option when it names one, otherwise the environment's locale.
 async function languageOf($, choice) {
-  if (choice === "en" || choice === "fr") return choice;
+  if (choice === "en" || choice === "fr" || choice === "ru") return choice;
   let locale = "";
   try {
     locale = (await $.env.get("LC_ALL")) || (await $.env.get("LC_MESSAGES")) || (await $.env.get("LANG")) || "";
@@ -544,7 +616,7 @@ async function languageOf($, choice) {
       locale = "";
     }
   }
-  return /^fr/i.test(locale) ? "fr" : "en";
+  return /^fr/i.test(locale) ? "fr" : /^ru/i.test(locale) ? "ru" : "en";
 }
 
 // ---------- Turns: readings kept per session ----------
@@ -628,14 +700,14 @@ function gaugeOf(limit, now) {
   return { kind: limit.kind, label: T.labels[limit.kind] ?? limit.kind, used, elapsed, tone, value: T.percent(Math.round(used)), when, resetAt };
 }
 
-// 3h02, 42 min, 2d23h (2j23h in French).
+// 3h02, 42 min, 2d23h (2j23h in French, 2д23ч in Russian).
 function duration(ms) {
   const minutes = Math.round(ms / MINUTE);
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return `${minutes} ${T.minute}`;
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
-  if (days > 0) return `${days}${T.day}${String(hours).padStart(2, "0")}h`;
-  return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
+  if (days > 0) return `${days}${T.day}${String(hours).padStart(2, "0")}${T.hour}`;
+  return `${hours}${T.hour}${String(minutes % 60).padStart(2, "0")}`;
 }
 
 // 24-hour time in the machine's time zone; UTC when the runtime has no time zone data.
