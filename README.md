@@ -67,7 +67,7 @@ In the app, **hover any pill** for its details.
 
 #### Run-out warning
 
-- Appears on the 7d pill when the week's pace would use up the limit **before** it resets: "⚠ out Sun night".
+- Appears on the 7d pill when the week's pace would use up the limit **before** it resets: "⚠ out Sun night" in the terminal; in the app, a shorter "⚠ Sun pm" takes the place of the time left (the reset date stays in the hover card).
 - Amber, red within a day.
 - Hover: the exact time and the last day's pace, to tell whether you are speeding up or slowing down.
   > At this week's pace (+62% in 3d23h), the 7-day limit runs out Sun night around 00:42, before the reset on Mon 19/10.
@@ -104,7 +104,7 @@ In the app, **hover any pill** for its details.
 
 #### Cost
 
-- What the session cost, as `/cost` totals it (cents dropped from $100).
+- What the session cost, as `/cost` totals it (cents dropped from $100; in the app, whole dollars on the pill and the cents in its hover card).
 - What the last prompt added, subagents included, in dollars and in points of the 5-hour limit ("+$1.07 · +2.5% 5h").
 - The app keeps the total in the pill and the last prompt in its hover card; the terminal writes both on the line.
 

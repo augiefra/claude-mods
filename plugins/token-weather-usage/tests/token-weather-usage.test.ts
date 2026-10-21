@@ -84,7 +84,12 @@ for (const surface of ["terminal", "desktop"] as const) {
     expect(texts).toContain(`${dot}3h00`);
     expect(texts).not.toContain(`${dot}3h00 → ${at(NOW + 3 * 3_600_000)}`);
     expect(texts).toContain("59%");
-    expect(texts).toContain(`${dot}3d00h`);
+    // Running out before the reset: the terminal keeps the countdown, the app shows the warning in its place.
+    if (surface === "terminal") expect(texts).toContain(`${dot}3d00h`);
+    else {
+      expect(texts).not.toContain("3d00h");
+      expect(texts.some((t) => /^⚠ \S/.test(t) && !t.startsWith("⚠ out"))).toBe(true);
+    }
     // No request yet: the cache block waits, no cost without a ledger. In the app the bolt stands for the word.
     if (surface === "terminal") expect(texts).toContain("cache");
     expect(texts).toContain("—");
@@ -457,14 +462,24 @@ test("cache: 5 minutes on an API key (no plan window)", async ($, on) => {
   expect(texts).toContain("5 min");
 });
 
+test("cost: under half a dollar, the app says less than one", async ($, on) => {
+  world(on);
+  on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS, cost: { usd: 0.42 } } }));
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  expect((await band($, "desktop")).texts).toContain("< $1");
+  expect((await band($, "terminal")).texts).toContain("≈ $0.42");
+});
+
 test("cost: shown in dollars, French format", async ($, on) => {
   world(on, { LANG: "fr_FR.UTF-8" });
   on("session.usage", () => ({ value: { startedAt: NOW, context: { tokens: 107_000, window: 1_000_000, percent: 11 }, rateLimits: LIMITS, cost: { usd: 4.321 } } }));
   await $.session.start({ source: "startup", cwd: "/tmp" } as any);
   for (const surface of ["terminal", "desktop"] as const) {
     const { ui, texts } = await band($, surface);
-    expect(texts).toContain("≈ 4,32 $");
+    // The app's pill shows whole dollars, the card the cents.
+    expect(texts).toContain(surface === "terminal" ? "≈ 4,32 $" : "≈ 4 $");
     if (surface === "desktop") {
+      expect(await cardOf(ui, "cost")).toContain("≈ 4,32 $");
       const svgs = (await ui.findAll({ type: "Svg" })) as any[];
       expect(svgs.some((s) => s.props?.alt === "Coût du fil" && String(s.props?.source).includes("#b8892a"))).toBe(true);
     }
@@ -483,7 +498,7 @@ test("cost: the last prompt's share, next to the total in the terminal, in the c
   expect(terminal.texts).toContain("≈ $4.84");
   expect(terminal.texts).toContain("(+$0.84)");
   const desktop = await band($, "desktop");
-  expect(desktop.texts).toContain("≈ $4.84");
+  expect(desktop.texts).toContain("≈ $5");
   expect(desktop.texts).not.toContain("+$0.84");
   expect(await cardOf(desktop.ui, "cost")).toBe(
     "Thread cost ≈ $4.84\nAt API prices: a subscription is not billed per token, this counts toward its limits.\nLast prompt: +$0.84",
@@ -1155,11 +1170,11 @@ test("agents: a subagent inside its parent's time does not count as running side
 // belong to the day before).
 const FR_DAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
 const FR_PARTS = ["nuit", "matin", "après-midi", "soir"];
-function frDayPart(ms: number) {
+function frDayPart(ms: number, short = false) {
   const d = new Date(ms);
   const h = d.getHours();
   if (h < 6) return `nuit de ${FR_DAYS[(d.getDay() + 6) % 7]} à ${FR_DAYS[d.getDay()]}`;
-  return `${FR_DAYS[d.getDay()]} ${FR_PARTS[h < 12 ? 1 : h < 18 ? 2 : 3]}`;
+  return `${FR_DAYS[d.getDay()]} ${(short ? ["nuit", "matin", "ap.-m.", "soir"] : FR_PARTS)[h < 12 ? 1 : h < 18 ? 2 : 3]}`;
 }
 const weekOf = (used: number, daysLeft: number) => [
   { kind: "seven_day", percentUsed: used, resetsAt: new Date(NOW + daysLeft * 86_400_000).toISOString() },
@@ -1176,7 +1191,11 @@ test("7-day estimate: at the week's pace the limit runs out before the reset", a
   expect(runOutText(texts)).toBe(`⚠ à court ${frDayPart(out)}`);
   const pill: any = await ui.find({ type: "Text", text: `⚠ à court ${frDayPart(out)}` });
   expect(pill?.props?.color).toBe("#a8690a");
-  const card = await cardOf((await band($, "desktop")).ui, "gauge-7j");
+  // In the app: the short warning in the countdown's place.
+  const desktop = await band($, "desktop");
+  expect(runOutText(desktop.texts)).toBe(`⚠ ${frDayPart(out, true)}`);
+  expect(desktop.texts).not.toContain("3j00h");
+  const card = await cardOf(desktop.ui, "gauge-7j");
   expect(card).toContain("Au rythme de la semaine (+70 % en 4j00h)");
   expect(card).not.toContain("Au rythme des dernières");
   expect(card).toContain("avant la remise à zéro du");

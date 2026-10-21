@@ -40,13 +40,16 @@ const TEXT = {
     causes: { model: "model changed", lapsed: "lapsed", prefix: "start changed" },
     underMinute: "< 1 min",
     cost: (usd) => (usd >= 100 ? `≈ $${Math.round(usd)}` : `≈ $${usd.toFixed(2)}`),
+    costWhole: (usd) => (usd < 0.5 ? "< $1" : `≈ $${Math.round(usd)}`),
     resetsAt: (time) => `Resets at ${time}`,
     weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
     dayParts: ["night", "morning", "afternoon", "evening"],
+    dayPartsShort: ["night", "am", "pm", "eve"],
     dayPart: (day, part) => `${day} ${part}`,
     night: (day) => `${day} night`,
     date: (day, d, m) => `${day} ${d}/${m}`,
     runOut: (when) => `⚠ out ${when}`,
+    runOutShort: (when) => `⚠ ${when}`,
     runOutTip: (gained, over, when, time, reset) => `At this week's pace (+${gained} in ${over}), the 7-day limit runs out ${when} around ${time}, before the reset on ${reset}.`,
     recentOut: (gained, over, when, time) => `At the last ${over}'s pace (+${gained}): ${when} around ${time}.`,
     recentLasts: (gained, over) => `At the last ${over}'s pace (+${gained}), it would last until the reset.`,
@@ -116,13 +119,16 @@ const TEXT = {
     causes: { model: "modèle changé", lapsed: "délai dépassé", prefix: "début modifié" },
     underMinute: "< 1 min",
     cost: (usd) => (usd >= 100 ? `≈ ${Math.round(usd)} $` : `≈ ${usd.toFixed(2).replace(".", ",")} $`),
+    costWhole: (usd) => (usd < 0.5 ? "< 1 $" : `≈ ${Math.round(usd)} $`),
     resetsAt: (time) => `Remise à zéro à ${time}`,
     weekdays: ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."],
     dayParts: ["nuit", "matin", "après-midi", "soir"],
+    dayPartsShort: ["nuit", "matin", "ap.-m.", "soir"],
     dayPart: (day, part) => `${day} ${part}`,
     night: (day, next) => `nuit de ${day} à ${next}`,
     date: (day, d, m) => `${day} ${d}/${m}`,
     runOut: (when) => `⚠ à court ${when}`,
+    runOutShort: (when) => `⚠ ${when}`,
     runOutTip: (gained, over, when, time, reset) => `Au rythme de la semaine (+${gained} en ${over}), la limite 7 jours sera atteinte ${when} vers ${time}, avant la remise à zéro du ${reset}.`,
     recentOut: (gained, over, when, time) => `Au rythme des dernières ${over} (+${gained}) : ${when} vers ${time}.`,
     recentLasts: (gained, over) => `Au rythme des dernières ${over} (+${gained}), elle tiendrait jusqu’à la remise à zéro.`,
@@ -188,13 +194,16 @@ const TEXT = {
     causes: { model: "смена модели", lapsed: "истёк срок", prefix: "изменилось начало" },
     underMinute: "< 1 мин",
     cost: (usd) => (usd >= 100 ? `≈ ${Math.round(usd)} $` : `≈ ${usd.toFixed(2).replace(".", ",")} $`),
+    costWhole: (usd) => (usd < 0.5 ? "< 1 $" : `≈ ${Math.round(usd)} $`),
     resetsAt: (time) => `Сброс в ${time}`,
     weekdays: ["вс", "пн", "вт", "ср", "чт", "пт", "сб"],
     dayParts: ["ночью", "утром", "днём", "вечером"],
+    dayPartsShort: ["ночью", "утром", "днём", "вечером"],
     dayPart: (day, part) => `${day} ${part}`,
     night: (day, next) => `в ночь на ${next}`,
     date: (day, d, m) => `${day} ${d}.${m}`,
     runOut: (when) => `⚠ кончится ${when}`,
+    runOutShort: (when) => `⚠ ${when}`,
     runOutTip: (gained, over, when, time, reset) => `При темпе этой недели (+${gained} за ${over}) недельный лимит закончится ${when} около ${time}, до сброса ${reset}.`,
     recentOut: (gained, over, when, time) => `При темпе последних ${over} (+${gained}): ${when} около ${time}.`,
     recentLasts: (gained, over) => `При темпе последних ${over} (+${gained}) лимита хватит до сброса.`,
@@ -468,7 +477,8 @@ const STALLED = 10 * MINUTE;
 
 const SEP = "│";
 const TEXT_CELLS = 6;
-const GAUGE = { width: 54, height: 9 };
+// 68 px: the band fits one line in the app with room to spare.
+const GAUGE = { width: 68, height: 9 };
 const TONES = {
   calm: { svg: "#3fa66b", text: "green" },
   // The theme's "yellow" is bright yellow in the app, unreadable on the yellow pill: a deep amber.
@@ -872,12 +882,12 @@ function recentPace(limit, used, now, resetMs) {
 }
 
 // "Fri evening": the hours after midnight belong to the day before ("Fri night").
-function dayPartOf(ms) {
+function dayPartOf(ms, short = false) {
   const d = new Date(ms);
   const h = d.getHours();
   const part = h < 6 ? 0 : h < 12 ? 1 : h < 18 ? 2 : 3;
   if (h < 6) return T.night(T.weekdays[(d.getDay() + 6) % 7], T.weekdays[d.getDay()]);
-  return T.dayPart(T.weekdays[d.getDay()], T.dayParts[part]);
+  return T.dayPart(T.weekdays[d.getDay()], (short ? T.dayPartsShort : T.dayParts)[part]);
 }
 
 function recentLine(r) {
@@ -1377,7 +1387,9 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
   if (mode === "text") parts.push(textGauge(Box, Text, g));
   parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
   // Terminal too narrow: the detail goes with the bar, leaving the label and the percentage.
-  if (g.when && mode === "svg") {
+  // In the app the run-out warning takes the reset countdown's place: it is the date that
+  // matters, and the reset stays in the hover card.
+  if (g.when && mode === "svg" && !g.out) {
     parts.push(divider(Text, "s"), icon(Svg, "i", "clock", color, T.icons.reset, SMALL_ICON), Text({ key: "d", dimColor: true, children: g.when }));
   }
   else if (g.when && mode === "text") parts.push(Text({ key: "d", dimColor: true, children: `· ${g.when}` }));
@@ -1385,7 +1397,8 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
   // Not when the line is too narrow for details: the warning would make it wrap.
   if (g.out && mode !== "none") {
     const color = g.out.left <= OUT_ALERT ? TONES.alert.text : TONES.fast.text;
-    parts.push(divider(Text, "o"), Text({ key: "w", bold: true, color, children: T.runOut(dayPartOf(g.out.at)) }));
+    const warning = mode === "svg" ? T.runOutShort(dayPartOf(g.out.at, true)) : T.runOut(dayPartOf(g.out.at));
+    parts.push(divider(Text, "o"), Text({ key: "w", bold: true, color, children: warning }));
   }
   // The 5-hour reset time and the 7-day estimate go to the hover card.
   const tip = g.resetAt
@@ -1503,7 +1516,8 @@ function drawLine(elements, surface, columns, now) {
   if (cacheNow) blocks.push(cacheBlock(elements, mode, cacheNow));
   // The cost goes first when the terminal is short of room.
   if (cost !== null && cost >= 0.005 && mode !== "none") {
-    const parts = [Text({ key: "v", bold: true, children: T.cost(cost) })];
+    // In the app the pill shows whole dollars; the card keeps the cents.
+    const parts = [Text({ key: "v", bold: true, children: desktop ? T.costWhole(cost) : T.cost(cost) })];
     const share = lastPromptText();
     if (desktop) {
       // The app keeps the total; the last prompt goes to the card.
