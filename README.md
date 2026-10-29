@@ -155,7 +155,7 @@ Labels are in English, French or Russian. By default (`auto`) the mod follows `L
 /reload-plugins
 ```
 
-This repository always has the latest version. The mod is also listed in the Claude plugin directory, but the copy there can be several versions behind, as each update waits for Anthropic's review.
+Install from this repository: it always has the latest version. The Claude plugin directory no longer accepts plugins that include a mod, so the copy still listed there is an old version (3.10.7) that will not be updated.
 
 If the line does not show up, restart Claude Code. A mod is code that runs inside Claude Code with the same access as Claude Code: read it before installing. This one is a single file, [token-weather-usage.mjs](plugins/token-weather-usage/hooks/token-weather-usage.mjs).
 
