@@ -1,7 +1,7 @@
 {
   "name": "token-weather-usage",
-  "version": "3.17.15",
-  "description": "One line above the prompt: context tokens with their weather, a bar per recent prompt, your 5-hour and 7-day limits against the time elapsed, the prompt cache with its time left, the session cost with the last prompt's share in dollars and in points of the 5-hour limit, and the subagents running. Labels in English, French or Russian. After Token Weather (Anthropic, Apache-2.0) and the ideas of usage-meter (HolyGrail) and prompt-cache-control (Daniel San).",
+  "version": "3.18.0",
+  "description": "One line above the prompt: context tokens with their weather, a bar per recent prompt, your 5-hour and 7-day limits against the time elapsed, the prompt cache with its time left, the session cost with the last prompt's share in dollars and in points of the 5-hour limit, the subagents running, and a one-click pill for the GOs Claude proposes. Labels in English, French or Russian. After Token Weather (Anthropic, Apache-2.0) and the ideas of usage-meter (HolyGrail) and prompt-cache-control (Daniel San).",
   "author": {
     "name": "Eric Cologni"
   },
@@ -24,6 +24,12 @@
       "title": "Language",
       "description": "Labels in English (en), French (fr) or Russian (ru), or auto: follows LC_ALL, LC_MESSAGES or LANG, and falls back to English.",
       "default": "auto"
+    },
+    "goPill": {
+      "type": "boolean",
+      "title": "GO pill",
+      "description": "Shows a pill at the end of the band when Claude's last answer proposes quoted approvals that start with GO (« GO push », “GO deploy”, \"GO merge\", `GO commit`); its OK sends them all back as your message. Off: no pill.",
+      "default": true
     }
   }
 }

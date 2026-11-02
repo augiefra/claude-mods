@@ -6,7 +6,7 @@
 
 [![Listed on statuslin.es](https://img.shields.io/badge/listed%20on-statuslin.es-c96442)](https://statuslin.es/mods/token-weather-usage)
 
-Stop hitting your Claude limit by surprise. One band above the prompt shows how big your context is, your 5-hour and weekly limits against the clock (with a warning when the week's pace would run out before the reset), whether the prompt cache is still warm, what the session and the last prompt cost, and which agents are running.
+Stop hitting your Claude limit by surprise. One band above the prompt shows how big your context is, your 5-hour and weekly limits against the clock (with a warning when the week's pace would run out before the reset), whether the prompt cache is still warm, what the session and the last prompt cost, which agents are running, and, when Claude asks for your go-ahead, one click to give it.
 
 ![One session, step by step](docs/band-story.gif)
 
@@ -38,6 +38,7 @@ Stop hitting your Claude limit by surprise. One band above the prompt shows how 
 | **Cache** | Minutes before the prompt cache lapses | Yellow under 10 min, red once expired, with what it will cost |
 | **Cost** | What the session cost, and the last prompt | Never: it just counts |
 | **Agents** | Subagents running and run so far | Never: it just counts |
+| **GO** | The approvals Claude's last answer asks for, with an OK to give them all | Shows only when there are some |
 
 In the app, **hover any pill** for its details.
 
@@ -97,7 +98,7 @@ In the app, **hover any pill** for its details.
 - Mods get the token counts but not the lifetime, so the mod follows Claude Code's rules and corrects itself from what the traffic shows.
 - Why a new thread beyond 300k: the next message would rewrite the whole context at full price, which a new thread avoids and a compaction would only read again. The terminal keeps the advice on the line ("· /compact", "· new thread"); the app puts it in the hover card.
 - Hover: the expiry time, the share of the last message read from the cache, what the context costs read from the cache against written again, and what the cache saved in this thread.
-- Prices: Anthropic's list prices dated 2026-10-08 (input, cache read, cache writes at 1.25× input for 5 minutes or 2× for 1 hour). On a subscription they are API-price equivalents, hence the "≈". A model missing from the price table shows tokens only.
+- Prices: Anthropic's list prices dated 2026-11-02 (input, cache read, cache writes at 1.25× input for 5 minutes or 2× for 1 hour). On a subscription they are API-price equivalents, hence the "≈". A model missing from the price table shows tokens only.
 - A compaction updates the band at once: the context drops to its new size, and the cache reads "compacted" until the next message writes a new one (not counted as a miss).
 
 </details>
@@ -132,6 +133,17 @@ In the app, **hover any pill** for its details.
 - The mod reads all this from the agents' responses: it never hooks a tool call, so it can neither slow one down nor stand in its way.
 
 </details>
+
+#### GO pill
+
+When Claude's last answer asks for approvals as quoted phrases that start with GO, a green pill ends the band: a double check, how many, and **OK**. Hover it for the list; click OK and the mod sends them back as your own message, each one quoted, so the thread records exactly what you approved:
+
+> You have my approval for all the GOs: “GO commit 3.17.16”, “GO push origin main”
+
+- Recognized: « GO … », “GO …”, "GO …" and `` `GO …` ``. Outside French quotes, GO must be in capitals, so `go test` in code never counts.
+- Nothing is sent until you click; the pill goes away with your next message.
+- To have Claude write its approvals this way, add a line to your `CLAUDE.md`, for example: *When a step needs my go-ahead (commit, push, publish, send), end with the exact approval to give, quoted: “GO push v1.2 to origin main”.*
+- Off in the **GO pill** option (`/config`). In the terminal it is a plain button, `✓✓ 2 GO`.
 
 #### App and terminal
 
@@ -168,9 +180,9 @@ claude plugin test ./plugins/token-weather-usage
 
 ## Privacy
 
-token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits, session cost, each request's cache token counts), the list of the session's subagents and the names of the tools their responses ask for (never the arguments; shown in the agents card, kept in memory only and never stored), the locale variables above and the prompt-cache switches (`DISABLE_PROMPT_CACHING`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`). It reads no file and hooks no tool call. It keeps in the plugin's local storage, on the machine, the latest limits reading, the 7-day share used every half hour over the last two days, and, per session, recent context readings, the last request's cache figures, what the cache saved in the session, the last prompt's cost and each subagent's model, effort, token counts and description (deleted after 8 idle days). No network requests.
+token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits, session cost, each request's cache token counts), the list of the session's subagents and the names of the tools their responses ask for (never the arguments; shown in the agents card, kept in memory only and never stored), the text of Claude's final answer in the main thread, to find the quoted GO approvals (kept in memory only, until your next message), the locale variables above and the prompt-cache switches (`DISABLE_PROMPT_CACHING`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`). It reads no file and hooks no tool call. It sends a message only when you click the GO pill's OK, and that message is only the approvals it showed you. It keeps in the plugin's local storage, on the machine, the latest limits reading, the 7-day share used every half hour over the last two days, and, per session, recent context readings, the last request's cache figures, what the cache saved in the session, the last prompt's cost and each subagent's model, effort, token counts and description (deleted after 8 idle days). No network requests.
 
-**What its hooks do.** Every hook only reads and passes the event on unchanged (`return next(e)`): the mod never changes, delays or refuses anything. `session.start` and `session.end` start and stop its timers; `turn.step` reads each model response's token counts and the names of the tools it asks for; `turn.complete` reads the session's usage after each turn; `session.measure` reads new limits and cost readings; `session.compact` notes a compaction; `ui.render` draws the band above the prompt.
+**What its hooks do.** Every hook only reads and passes the event on unchanged (`return next(e)`): the mod never changes, delays or refuses anything; the one message it can send is the GO pill's, on your click. `session.start` and `session.end` start and stop its timers; `turn.step` reads each model response's token counts and the names of the tools it asks for; `turn.complete` reads the session's usage after each turn and the main thread's final answer for its GO approvals; `session.measure` reads new limits and cost readings; `session.compact` notes a compaction; `ui.render` draws the band above the prompt, with the GO pill at its end.
 
 ## Credits
 

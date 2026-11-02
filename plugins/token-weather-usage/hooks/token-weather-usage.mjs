@@ -100,6 +100,12 @@ const TEXT = {
       batchHow: (together, calls) => [together ? `${together.toFixed(1)}× in parallel` : "", calls ? `${calls} ${calls === 1 ? "tool call" : "tool calls"}` : ""].filter(Boolean).join(" · "),
     },
     icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents" },
+    go: {
+      quote: (g) => `“${g}”`,
+      message: (list) => `You have my approval for all the GOs: ${list.join(", ")}`,
+      click: "Click OK: approve them all",
+      alt: "All the GOs",
+    },
   },
   fr: {
     weather: { clear: "Clair", cloudy: "Nuageux", showers: "Averses", storm: "Orage", compact: "Compacter bientôt" },
@@ -175,6 +181,12 @@ const TEXT = {
       batchHow: (together, calls) => [together ? `${together.toFixed(1).replace(".", ",")}× en parallèle` : "", calls ? `${calls} ${calls === 1 ? "appel d'outil" : "appels d'outils"}` : ""].filter(Boolean).join(" · "),
     },
     icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents" },
+    go: {
+      quote: (g) => `« ${g} »`,
+      message: (list) => `Tu as mon autorisation pour tous les GO : ${list.join(", ")}`,
+      click: "Clic sur OK : tous les donner",
+      alt: "Tous les GO",
+    },
   },
   ru: {
     weather: { clear: "Ясно", cloudy: "Облачно", showers: "Ливни", storm: "Гроза", compact: "Скоро сжатие" },
@@ -251,6 +263,12 @@ const TEXT = {
         [together ? `${together.toFixed(1).replace(".", ",")}× параллельно` : "", calls ? `${calls} ${plural(calls, "вызов", "вызова", "вызовов")} ${plural(calls, "инструмента", "инструментов", "инструментов")}` : ""].filter(Boolean).join(" · "),
     },
     icons: { five_hour: "Лимит на 5 часов", seven_day: "Лимит на 7 дней", spend_limit: "Лимит расходов", reset: "Сброс через", cache: "Кэш промпта", cost: "Стоимость сессии", lastPrompt: "Последний промпт", agents: "Агенты" },
+    go: {
+      quote: (g) => `«${g}»`,
+      message: (list) => `Даю согласие на все GO: ${list.join(", ")}`,
+      click: "Нажмите OK: одобрить все",
+      alt: "Все GO",
+    },
   },
 };
 let T = TEXT.en;
@@ -412,7 +430,7 @@ let seenTtl = null;
 // at the input price minus the cache-read price.
 let savedUsd = 0;
 
-// Anthropic first-party list prices, USD per million tokens, as of 2026-10-08: input and cache
+// Anthropic first-party list prices, USD per million tokens, as of 2026-11-02: input and cache
 // read. Cache writes follow from input: 1.25× for the 5-minute lifetime, 2× for 1 hour; output
 // is 5× input for every model here (OUTPUT).
 // "over" holds the prices of prompts above "at" tokens, for a model priced by prompt size.
@@ -421,14 +439,19 @@ const PRICES = {
   "claude-fable-5-1": { input: 10, read: 0.25 },
   "claude-mythos-5-1": { input: 10, read: 0.25 },
   "claude-fable-5": { input: 10, read: 1 },
+  "claude-mythos-5": { input: 10, read: 1 },
   "claude-opus-5-5": { input: 4, read: 0.2 },
   "claude-opus-5": { input: 5, read: 0.5 },
   "claude-opus-4-8": { input: 5, read: 0.5 },
   "claude-opus-4-7": { input: 5, read: 0.5 },
   "claude-opus-4-6": { input: 5, read: 0.5 },
+  "claude-opus-4-5": { input: 5, read: 0.5 },
+  "claude-opus-4-1": { input: 15, read: 1.5 },
+  "claude-opus-4": { input: 15, read: 1.5 },
   "claude-sonnet-5-5": { input: 2, read: 0.1 },
   "claude-sonnet-5": { input: 2, read: 0.2 },
   "claude-sonnet-4-6": { input: 3, read: 0.3 },
+  "claude-sonnet-4-5": { input: 3, read: 0.3 },
   "claude-haiku-5-5": { input: 0.1, read: 0.01, over: { at: 100_000, input: 0.5, read: 0.05 } },
   "claude-haiku-4-5": { input: 1, read: 0.1 },
 };
@@ -531,6 +554,7 @@ const RESERVED_COLUMNS = 2;
 
 export function register(on, options) {
   const language = options?.language;
+  goOn = options?.goPill !== false && String(options?.goPill).toLowerCase() !== "false";
 
   on("session.start", async ($, e, next) => {
     ticker?.cancel();
@@ -599,6 +623,7 @@ export function register(on, options) {
   // Each main-loop request: how much of its prompt the cache served (subagents have their own).
   // A subagent's request goes to its line in the agents card: model, effort, tokens, cost.
   on("turn.step", async function* ($, e, next) {
+    goStep($, e);
     if (e.agentId) {
       const id = e.agentId;
       const at = await $.clock.now();
@@ -649,6 +674,7 @@ export function register(on, options) {
   // One context reading after each main turn (not subagents' turns).
   on("turn.complete", async ($, e, next) => {
     const result = await next(e);
+    goAnswer($, e);
     // A subagent's turn: it may have just finished.
     if (e.agentId) {
       if (waiting[e.agentId]) {
@@ -723,7 +749,7 @@ export function register(on, options) {
     const line = drawLine(elements, e.surface, props.bodyColumns ?? 80, now);
     // Mods placed after us draw below our line; an empty drawing adds no blank line.
     const below = await next(e);
-    return isBlank(below) ? line : elements.Box({ flexDirection: "column", children: [line, below] });
+    return withGoPill($, e, isBlank(below) ? line : elements.Box({ flexDirection: "column", children: [line, below] }));
   });
 }
 
@@ -1622,6 +1648,126 @@ function lastPromptText() {
   return parts.join(" · ");
 }
 
+
+// ---------- GO pill ----------
+
+// The approvals the last answer of the main thread proposes, in order: quoted phrases that
+// start with "GO" (« GO push 3.17 », “GO deploy”, "GO merge", `GO commit`). One click on the
+// pill's OK sends them all back as the person's own message, each quoted, so the thread records
+// exactly what was approved. Nothing is sent without that click.
+let gos = [];
+let goOn = true;
+
+// French quotes take "Go" too; the others want "GO" in capitals, so `go test` stays code.
+const GO_QUOTES = [
+  ["«", "»", "gi"],
+  ["“", "”", "g"],
+  ['"', '"', "g"],
+  ["`", "`", "g"],
+];
+
+export function goList(answer) {
+  const text = String(answer ?? "");
+  const found = [];
+  for (const [open, close, flags] of GO_QUOTES) {
+    const pattern = new RegExp(`${open}[\\s\\u00a0\\u202f]*(GO\\b[^${open}${close}\\n]*?)[\\s\\u00a0\\u202f]*${close}`, flags);
+    for (const m of text.matchAll(pattern)) found.push({ at: m.index, go: m[1].replace(/\s+/g, " ").trim() });
+  }
+  found.sort((a, b) => a.at - b.at);
+  const seen = new Set();
+  const list = [];
+  for (const { go } of found) {
+    if (go.length > 3 && !seen.has(go.toLowerCase())) {
+      seen.add(go.toLowerCase());
+      list.push(go);
+    }
+  }
+  return list;
+}
+
+export function goMessage(list) {
+  return T.go.message(list.map(T.go.quote));
+}
+
+// A double check, in the green of the 5-hour gauge.
+const GO_TINT = ["rgba(63,166,107,0.13)", "rgba(63,166,107,0.32)"];
+const GO_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><g fill="none" stroke="#3a9a62" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8.5l2.8 2.8L10 5.5"/><path d="M7.5 11.3L13.5 5"/></g></svg>`;
+
+function goPill($, e) {
+  const { Box, Text, Button, Svg } = $.ui.resolve(e);
+  const list = gos.slice();
+  const count = String(list.length);
+  const onPress = async () => {
+    if (gos.length === 0) return;
+    gos = [];
+    $.ui.invalidate("ui.render");
+    await $.prompt.submit({ text: goMessage(list), asUser: true });
+  };
+  if (e.surface !== "desktop") return Button({ key: "go-all", label: `✓✓ ${count} GO`, onPress });
+  // The count in bold like the other pills' values. Only a Button takes a press, and the app's
+  // own button draws its label in its own style: the click sits on a small OK. A thin space
+  // keeps the hovered button off the count.
+  const card = [...list.map(T.go.quote), T.go.click];
+  return Box({
+    key: "go-pill",
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: 1,
+    flexShrink: 0,
+    paddingX: 1,
+    paddingY: 0,
+    borderStyle: "round",
+    borderColor: GO_TINT[1],
+    backgroundColor: GO_TINT[0],
+    children: [
+      Svg({ key: "i", source: GO_ICON, alt: T.go.alt, width: 16, height: 16 }),
+      Box({ key: "go", flexDirection: "row", alignItems: "center", columnGap: 0, children: [Text({ key: "n", bold: true, children: count + "\u2009" }), Button({ key: "go-all", label: "OK", plain: true, onPress })] }),
+      hoverCard(Box, Text, card.join("\n")),
+    ],
+  });
+}
+
+// The band's row of pills: the first Box laid out as a wrapping row.
+function addToRow(node, pill) {
+  if (!node || typeof node !== "object") return null;
+  const props = node.props ?? {};
+  if (node.type === "Box" && props.flexDirection === "row" && props.flexWrap === "wrap") {
+    return { ...node, children: [...(node.children ?? []), pill] };
+  }
+  const children = node.children ?? [];
+  for (let i = 0; i < children.length; i++) {
+    const next = addToRow(children[i], pill);
+    if (next) return { ...node, children: [...children.slice(0, i), next, ...children.slice(i + 1)] };
+  }
+  return null;
+}
+
+// A new request of the main thread to the model: the previous proposal no longer stands.
+function goStep($, e) {
+  if (e.agentId || gos.length === 0) return;
+  gos = [];
+  $.ui.invalidate("ui.render");
+}
+
+// The main thread's final answer: its GOs.
+function goAnswer($, e) {
+  if (e.agentId || !goOn) return;
+  gos = e.reason === "answer" ? goList(e.answer) : [];
+  $.ui.invalidate("ui.render");
+}
+
+// The band, with the pill at the end of its row; without a band, a row of its own.
+// (The app stacks each mod's drawing: another mod cannot put a pill in this row.)
+function withGoPill($, e, drawn) {
+  const props = e.props ?? e;
+  if (!goOn || gos.length === 0 || props.hasSurvey) return drawn;
+  const pill = goPill($, e);
+  const joined = addToRow(drawn, pill);
+  if (joined) return joined;
+  const { Box } = $.ui.resolve(e);
+  const own = Box({ flexDirection: "row", flexWrap: "wrap", alignItems: "center", paddingX: 1, children: [pill] });
+  return isBlank(drawn) ? own : Box({ flexDirection: "column", children: [own, drawn] });
+}
 
 // ---------- Weather: readings and drawing (Token Weather) ----------
 
