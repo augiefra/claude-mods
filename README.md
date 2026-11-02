@@ -136,13 +136,19 @@ In the app, **hover any pill** for its details.
 
 #### GO pill
 
-When Claude's last answer asks for approvals as quoted phrases that start with GO, a green pill ends the band: a double check, how many, and **OK**. Hover it for the list; click OK and the mod sends them back as your own message, each one quoted, so the thread records exactly what you approved:
+**Approve what Claude asks for in one click.** When Claude stops to ask for your go-ahead (commit, push, publish, send…) and writes each approval as a quoted phrase starting with GO, a green pill ends the band: a double check, how many, and **OK**. Hover it to read them; click OK and the mod sends them back as your own message, each one quoted, so the thread records exactly what you approved, and nothing more.
 
-> You have my approval for all the GOs: “GO commit 3.17.16”, “GO push origin main”
+![Claude asks for two approvals, the pill counts them, one click on OK sends them back](docs/go-pill.png)
 
-- Recognized: « GO … », “GO …”, "GO …" and `` `GO …` ``. Outside French quotes, GO must be in capitals, so `go test` in code never counts.
-- Nothing is sent until you click; the pill goes away with your next message.
-- To have Claude write its approvals this way, add a line to your `CLAUDE.md`, for example: *When a step needs my go-ahead (commit, push, publish, send), end with the exact approval to give, quoted: “GO push v1.2 to origin main”.*
+**Make Claude write its approvals this way.** Add a line like this to your `CLAUDE.md` (global or per project):
+
+```markdown
+When a step needs my go-ahead (commit, push, publish, deploy, send), end your answer with the exact approval to give, quoted and starting with GO: “GO push v1.2 to origin main”. Never quote a GO you are not asking for.
+```
+
+- Recognized: “GO …”, "GO …", « GO … » and `` `GO …` ``. Outside French quotes, GO must be in capitals, so `go test` in code never counts.
+- Nothing is sent until you click OK. The pill goes away with your next message, and a subagent's answer never fills it.
+- The message follows the mod's language: “You have my approval for all the GOs: …” in English, French or Russian.
 - Off in the **GO pill** option (`/config`). In the terminal it is a plain button, `✓✓ 2 GO`.
 
 #### App and terminal

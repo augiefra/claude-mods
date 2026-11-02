@@ -19,6 +19,9 @@ One band above the Claude Code prompt: the context in tokens, your 5-hour and 7-
 - **Agents**: how many subagents the thread ran ("2 running · 7" while some run). In the app the pill stays; hover it for the cost split by model and effort, the agents running with the name of each one's latest tool (never its arguments), the last batch (how long, how much ran in parallel, tool calls, cost) and what delegating saved.
 - **GO**: when Claude's last answer asks for approvals quoted as « GO … », “GO …”, "GO …" or `GO …` (GO in capitals outside French quotes), a green pill ends the band; its OK sends them all back as your own message, each quoted. Nothing is sent without that click. Add a line to your `CLAUDE.md` so Claude ends with the approval to give, quoted (“GO push v1.2 to origin main”). Off in the **GO pill** option (`/config`).
 
+![The GO pill: Claude asks for two approvals, one click on OK sends them back](https://raw.githubusercontent.com/augiefra/claude-mods/main/docs/go-pill.png)
+
+
 In the terminal:
 
 ```
