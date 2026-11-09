@@ -430,12 +430,14 @@ let seenTtl = null;
 // at the input price minus the cache-read price.
 let savedUsd = 0;
 
-// Anthropic first-party list prices, USD per million tokens, as of 2026-11-02: input and cache
+// Anthropic first-party list prices, USD per million tokens, as of 2026-11-09: input and cache
 // read. Cache writes follow from input: 1.25× for the 5-minute lifetime, 2× for 1 hour; output
 // is 5× input for every model here (OUTPUT).
 // "over" holds the prices of prompts above "at" tokens, for a model priced by prompt size.
 // Update this table, and its date, when the prices change. A model missing here shows tokens only.
 const PRICES = {
+  "claude-fable-5-2": { input: 8, read: 0.2 },
+  "claude-mythos-5-2": { input: 8, read: 0.2 },
   "claude-fable-5-1": { input: 10, read: 0.25 },
   "claude-mythos-5-1": { input: 10, read: 0.25 },
   "claude-fable-5": { input: 10, read: 1 },

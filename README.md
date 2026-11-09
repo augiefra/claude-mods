@@ -98,7 +98,7 @@ In the app, **hover any pill** for its details.
 - Mods get the token counts but not the lifetime, so the mod follows Claude Code's rules and corrects itself from what the traffic shows.
 - Why a new thread beyond 300k: the next message would rewrite the whole context at full price, which a new thread avoids and a compaction would only read again. The terminal keeps the advice on the line ("· /compact", "· new thread"); the app puts it in the hover card.
 - Hover: the expiry time, the share of the last message read from the cache, what the context costs read from the cache against written again, and what the cache saved in this thread.
-- Prices: Anthropic's list prices dated 2026-11-02 (input, cache read, cache writes at 1.25× input for 5 minutes or 2× for 1 hour). On a subscription they are API-price equivalents, hence the "≈". A model missing from the price table shows tokens only.
+- Prices: Anthropic's list prices dated 2026-11-09 (input, cache read, cache writes at 1.25× input for 5 minutes or 2× for 1 hour). On a subscription they are API-price equivalents, hence the "≈". A model missing from the price table shows tokens only.
 - A compaction updates the band at once: the context drops to its new size, and the cache reads "compacted" until the next message writes a new one (not counted as a miss).
 
 </details>

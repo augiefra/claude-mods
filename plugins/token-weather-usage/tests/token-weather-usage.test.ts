@@ -939,6 +939,8 @@ test("prices: Bedrock and Vertex ids find the same model as the API's (#9)", () 
     "claude-sonnet-5-5@20260101",
     "publishers/anthropic/models/claude-sonnet-5-5@20260101",
   ]) expect(modelId(id)).toBe("claude-sonnet-5-5");
+  // The 1M-context alias a setting can pin (ANTHROPIC_DEFAULT_FABLE_MODEL).
+  expect(modelId("claude-fable-5-2[1m]")).toBe("claude-fable-5-2");
 });
 
 test("agents: a tool's name in Claude Code's words, never its arguments", () => {
