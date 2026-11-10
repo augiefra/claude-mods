@@ -34,6 +34,7 @@ Stop hitting your Claude limit by surprise. One band above the prompt shows how 
 | --- | --- | --- |
 | **Context** | Tokens in the context, the last 5 prompts as bars | The weather turns from Clear to "Compact soon" |
 | **5h / 7d** | Share of each limit used, time left | Yellow when you run ahead of the clock, red when far ahead or past 90% |
+| **Day budget** | On a plan with the weekly limit alone: what a day may use until the reset | Never: it just counts |
 | **Run-out** | When this week's pace would hit the 7-day limit | Amber "⚠ out Sun night", red within a day |
 | **Cache** | Minutes before the prompt cache lapses | Yellow under 10 min, red once expired, with what it will cost |
 | **Cost** | What the session cost, and the last prompt | Never: it just counts |
@@ -65,6 +66,15 @@ In the app, **hover any pill** for its details.
 - The latest reading is shared across the sessions open on the machine.
 
 </details>
+
+#### Weekly limit alone
+
+On a plan without a 5-hour window, the band uses the room for the week:
+
+- **A day pill** takes the 5-hour pill's place: what is left of the 7-day limit over the days left ("15% a day"). Hover: what is left, until when, and what today used so far ("Today so far: +6%").
+- **The 7d pill says where the week ends** at its pace so far ("→ 64% Mon") in place of the time left, which moves to the hover card. From the week's second day; when the pace would run out before the reset, the run-out warning below shows instead.
+- **The 7d bar is twice as long** in the app, in the room the 5-hour pill left.
+- In the terminal both sit on the line: `15%/day │ 7d ━━──── 26% · 5d00h → 91% Wed`.
 
 #### Run-out warning
 

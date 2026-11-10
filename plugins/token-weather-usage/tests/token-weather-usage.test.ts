@@ -315,6 +315,84 @@ for (const surface of ["terminal", "desktop"] as const) {
   });
 }
 
+// ---------- The weekly limit alone (no 5-hour window) ----------
+
+// 2 of 7 days elapsed, 26% used: the week ends around 91%; 74% left over 5 days, 15% a day.
+const WEEK_ALONE = [{ kind: "seven_day", percentUsed: 26, resetsAt: new Date(NOW + 5 * 86_400_000).toISOString() }];
+const resetDay = (ms: number) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(ms).getDay()];
+
+test("week alone, app: a day pill before the week's, which says where the week ends", async ($, on) => {
+  // A reading from the day before: 20% then, so 6 points today.
+  world(on, {}, { week: [{ at: NOW - 86_400_000, used: 20, resetsAt: WEEK_ALONE[0].resetsAt }] });
+  withUsage(on, WEEK_ALONE);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  const row = ((await ui.findAll({ type: "Box" })) as any[]).find((b) => b.props?.flexWrap === "wrap");
+  const keys = (row.children as any[]).map((c) => c.props?.key ?? c.key);
+  expect(keys.slice(0, 3)).toEqual(["context", "day", "gauge-7d"]);
+  expect(texts).toContain("15%");
+  expect(texts).toContain("a day");
+  const end = `→ 91% ${resetDay(NOW + 5 * 86_400_000)}`;
+  expect(texts).toContain(end);
+  // The countdown left the pill for its card.
+  expect(texts).not.toContain("5d00h");
+  expect(await cardOf(ui, "gauge-7d")).toContain("the week ends around 91%");
+  expect(await cardOf(ui, "gauge-7d")).toContain("in 5d00h");
+  const card = await cardOf(ui, "day");
+  expect(card).toContain("74% left for 5d00h: 15% a day");
+  expect(card).toContain("Today so far: +6%.");
+  // Alone, the week's bar is twice as long.
+  const bar = ((await ui.findAll({ type: "Svg" })) as any[]).find((x) => x.props?.height === 9);
+  expect(bar?.props?.width).toBe(136);
+  expect(String(bar?.props?.source)).toContain('viewBox="0 0 136 9"');
+});
+
+test("week alone, terminal: the budget and the week's end on the line", async ($, on) => {
+  world(on);
+  withUsage(on, WEEK_ALONE);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("15%/day");
+  expect(texts).toContain(`· 5d00h → 91% ${resetDay(NOW + 5 * 86_400_000)}`);
+});
+
+test("week alone: no projection in the week's first day, the countdown stays", async ($, on) => {
+  world(on);
+  withUsage(on, [{ kind: "seven_day", percentUsed: 4, resetsAt: new Date(NOW + 6.5 * 86_400_000).toISOString() }]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  expect(texts).toContain("6d12h");
+  expect(texts.some((t) => t.startsWith("→"))).toBe(false);
+  // 96% over 6.5 days.
+  expect(texts).toContain("15%");
+  // The week began today: everything used was used today.
+  expect(await cardOf(ui, "day")).toContain("Today so far: +4%.");
+});
+
+test("with a 5-hour window: no day pill, the week keeps its countdown", async ($, on) => {
+  world(on);
+  withUsage(on, [...WEEK_ALONE, LIMITS[1]]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  const bars = ((await ui.findAll({ type: "Svg" })) as any[]).filter((x) => x.props?.height === 9);
+  expect(bars.map((x) => x.props?.width)).toEqual([68, 68]);
+  expect(await ui.find({ type: "Box", key: "day" }).catch(() => null)).toBeFalsy();
+  expect(texts).toContain("5d00h");
+  expect(texts.some((t) => t.startsWith("→"))).toBe(false);
+});
+
+test("a 5-hour window that already reset: hidden, and the week stays as on a 5-hour plan", async ($, on) => {
+  world(on);
+  withUsage(on, [...WEEK_ALONE, { kind: "five_hour", percentUsed: 80, resetsAt: new Date(NOW - 3_600_000).toISOString() }]);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  const bars = ((await ui.findAll({ type: "Svg" })) as any[]).filter((x) => x.props?.height === 9);
+  expect(bars.map((x) => x.props?.width)).toEqual([68]);
+  expect(await ui.find({ type: "Box", key: "day" }).catch(() => null)).toBeFalsy();
+  expect(texts).toContain("5d00h");
+  expect(texts.some((t) => t.startsWith("→"))).toBe(false);
+});
+
 // ---------- Prompt cache and cost ----------
 
 // One main-loop request answered with this usage.

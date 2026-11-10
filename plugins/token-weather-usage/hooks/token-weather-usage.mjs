@@ -55,6 +55,15 @@ const TEXT = {
     recentLasts: (gained, over) => `At the last ${over}'s pace (+${gained}), it would last until the reset.`,
     lastPrompt: (usd) => `+$${usd.toFixed(2)}`,
     lastPrompt5h: (points) => `+${decimal(points)}% 5h`,
+    share: (x) => `${decimal(x)}%`,
+    weekEnd: (pct, day) => `→ ${pct} ${day}`,
+    weekEndTip: (gained, over, pct, reset, left) => `At this week's pace (+${gained} in ${over}), the week ends around ${pct}.\nResets ${reset}, in ${left}.`,
+    perDay: "a day",
+    perDayShort: (pct) => `${pct}/day`,
+    dayTips: {
+      budget: (left, time, pct, reset) => `${left} left for ${time}: ${pct} a day until the reset on ${reset}.`,
+      today: (pct) => `Today so far: +${pct}.`,
+    },
     toRewrite: (tokens) => `${tokens} to rewrite`,
     newThread: "new thread",
     // $2.32, $182 from 100 dollars, < $0.01 under a cent.
@@ -99,7 +108,7 @@ const TEXT = {
       batch: (n, wall, usd) => `Last batch: ${n} agents in ${wall}${usd ? ` · ${usd}` : ""}`,
       batchHow: (together, calls) => [together ? `${together.toFixed(1)}× in parallel` : "", calls ? `${calls} ${calls === 1 ? "tool call" : "tool calls"}` : ""].filter(Boolean).join(" · "),
     },
-    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents" },
+    icons: { five_hour: "5-hour limit", seven_day: "7-day limit", spend_limit: "Spend limit", reset: "Resets in", cache: "Prompt cache", cost: "Session cost", lastPrompt: "Last prompt", agents: "Agents", day: "Daily budget", weekEnd: "End of the week at this pace" },
     go: {
       quote: (g) => `“${g}”`,
       message: (list) => `You have my approval for all the GOs: ${list.join(", ")}`,
@@ -140,6 +149,15 @@ const TEXT = {
     recentLasts: (gained, over) => `Au rythme des dernières ${over} (+${gained}), elle tiendrait jusqu’à la remise à zéro.`,
     lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
     lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")} % 5h`,
+    share: (x) => `${decimal(x).replace(".", ",")} %`,
+    weekEnd: (pct, day) => `→ ${pct} ${day}`,
+    weekEndTip: (gained, over, pct, reset, left) => `Au rythme de la semaine (+${gained} en ${over}), la semaine finirait vers ${pct}.\nRemise à zéro ${reset}, dans ${left}.`,
+    perDay: "par jour",
+    perDayShort: (pct) => `${pct}/jour`,
+    dayTips: {
+      budget: (left, time, pct, reset) => `${left} restants pour ${time} : ${pct} par jour jusqu'à la remise à zéro du ${reset}.`,
+      today: (pct) => `Aujourd'hui : +${pct}.`,
+    },
     toRewrite: (tokens) => `${tokens} à réécrire`,
     newThread: "nouveau fil",
     money: (usd) => (usd < 0.01 ? "< 0,01 $" : `${amount(usd).replace(".", ",")} $`),
@@ -180,7 +198,7 @@ const TEXT = {
       batch: (n, wall, usd) => `Dernier lot : ${n} agents en ${wall}${usd ? ` · ${usd}` : ""}`,
       batchHow: (together, calls) => [together ? `${together.toFixed(1).replace(".", ",")}× en parallèle` : "", calls ? `${calls} ${calls === 1 ? "appel d'outil" : "appels d'outils"}` : ""].filter(Boolean).join(" · "),
     },
-    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents" },
+    icons: { five_hour: "Limite 5 h", seven_day: "Limite 7 jours", spend_limit: "Plafond de dépense", reset: "Remise à zéro dans", cache: "Cache de prompt", cost: "Coût du fil", lastPrompt: "Dernier prompt", agents: "Agents", day: "Budget par jour", weekEnd: "Fin de semaine à ce rythme" },
     go: {
       quote: (g) => `« ${g} »`,
       message: (list) => `Tu as mon autorisation pour tous les GO : ${list.join(", ")}`,
@@ -221,6 +239,15 @@ const TEXT = {
     recentLasts: (gained, over) => `При темпе последних ${over} (+${gained}) лимита хватит до сброса.`,
     lastPrompt: (usd) => `+${usd.toFixed(2).replace(".", ",")} $`,
     lastPrompt5h: (points) => `+${decimal(points).replace(".", ",")}% 5ч`,
+    share: (x) => `${decimal(x).replace(".", ",")}%`,
+    weekEnd: (pct, day) => `→ ${pct} ${day}`,
+    weekEndTip: (gained, over, pct, reset, left) => `При темпе этой недели (+${gained} за ${over}) неделя закончится примерно на ${pct}.\nСброс ${reset}, через ${left}.`,
+    perDay: "в день",
+    perDayShort: (pct) => `${pct}/день`,
+    dayTips: {
+      budget: (left, time, pct, reset) => `Осталось ${left} на ${time}: ${pct} в день до сброса ${reset}.`,
+      today: (pct) => `Сегодня: +${pct}.`,
+    },
     toRewrite: (tokens) => `${tokens} к перезаписи`,
     newThread: "новый тред",
     money: (usd) => (usd < 0.01 ? "< 0,01 $" : `${amount(usd).replace(".", ",")} $`),
@@ -262,7 +289,7 @@ const TEXT = {
       batchHow: (together, calls) =>
         [together ? `${together.toFixed(1).replace(".", ",")}× параллельно` : "", calls ? `${calls} ${plural(calls, "вызов", "вызова", "вызовов")} ${plural(calls, "инструмента", "инструментов", "инструментов")}` : ""].filter(Boolean).join(" · "),
     },
-    icons: { five_hour: "Лимит на 5 часов", seven_day: "Лимит на 7 дней", spend_limit: "Лимит расходов", reset: "Сброс через", cache: "Кэш промпта", cost: "Стоимость сессии", lastPrompt: "Последний промпт", agents: "Агенты" },
+    icons: { five_hour: "Лимит на 5 часов", seven_day: "Лимит на 7 дней", spend_limit: "Лимит расходов", reset: "Сброс через", cache: "Кэш промпта", cost: "Стоимость сессии", lastPrompt: "Последний промпт", agents: "Агенты", day: "Бюджет на день", weekEnd: "Конец недели при этом темпе" },
     go: {
       quote: (g) => `«${g}»`,
       message: (list) => `Даю согласие на все GO: ${list.join(", ")}`,
@@ -502,8 +529,9 @@ const STALLED = 10 * MINUTE;
 
 const SEP = "│";
 const TEXT_CELLS = 6;
-// 68 px: the band fits one line in the app with room to spare.
-const GAUGE = { width: 68, height: 9 };
+// 68 px: the band fits one line in the app with room to spare. Twice as long when the weekly
+// limit is alone: the 5-hour pill left its place, and a longer bar reads better.
+const GAUGE = { width: 68, solo: 136, height: 9 };
 const TONES = {
   calm: { svg: "#3fa66b", text: "green" },
   // The theme's "yellow" is bright yellow in the app, unreadable on the yellow pill: a deep amber.
@@ -530,6 +558,10 @@ const TINTS = {
 const ICON_SIZE = 16;
 const SMALL_ICON = 14;
 const ICONS = {
+  // A sun on the horizon: what a day may use. A flag: where the week ends.
+  day: (c) =>
+    `<path d="M3 18.5h18M6.5 18.5a5.5 5.5 0 0 1 11 0M12 6.5V9M4.8 11.3l1.8 1.8M19.2 11.3l-1.8 1.8" fill="none" stroke="${c}" stroke-width="2.1" stroke-linecap="round"/>`,
+  flag: (c) => `<path d="M6 21V4.5M6 5h11l-2.5 3.5L17 12H6" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
   // Gauge and speech bubble are drawn around y=11.5: half a unit down centres them like the others.
   gauge: (c) =>
     `<g transform="translate(0 0.5)"><path d="M3.6 18.5a9.5 9.5 0 1 1 16.8 0" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><path d="M12 14.5l4.3-4.6" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="14.5" r="1.7" fill="${c}"/></g>`,
@@ -879,7 +911,30 @@ function gaugeOf(limit, now) {
   // The time left; the 5-hour reset time goes to the clock's tooltip.
   const when = left !== null ? duration(left) : "";
   const resetAt = left !== null && limit.kind === "five_hour" ? clockTime(resetMs) : "";
-  return { kind: limit.kind, label: T.labels[limit.kind] ?? limit.kind, used, elapsed, tone, value: T.percent(Math.round(used)), when, resetAt, out: runOutOf(limit, used, now) };
+  return { kind: limit.kind, label: T.labels[limit.kind] ?? limit.kind, used, elapsed, tone, value: T.percent(Math.round(used)), when, resetAt, out: runOutOf(limit, used, now), left, resetMs, end: weekEndOf(limit, used, now), today: todayOf(limit, used, now) };
+}
+
+// Where the week ends at its pace so far, in points of the 7-day limit; null in the week's
+// first day (a few hours say little) and when it would run out (the warning says when).
+function weekEndOf(limit, used, now) {
+  if (limit.kind !== "seven_day") return null;
+  const resetMs = Date.parse(limit.resetsAt ?? "");
+  if (!Number.isFinite(resetMs)) return null;
+  const start = resetMs - SPANS.seven_day;
+  if (now - start < OUT_MIN_ELAPSED || now >= resetMs) return null;
+  const end = Math.round((used * SPANS.seven_day) / (now - start));
+  return end < 100 ? { end, over: now - start } : null;
+}
+
+// The points of the 7-day limit used since midnight, from the readings kept; null unknown.
+function todayOf(limit, used, now) {
+  if (limit.kind !== "seven_day") return null;
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  let base = null;
+  for (const s of week) if (s.resetsAt === limit.resetsAt && s.at <= midnight && (!base || s.at > base.at)) base = s;
+  // No reading before midnight: known only when the week itself began today, at zero.
+  const from = base ? base.used : Date.parse(limit.resetsAt ?? "") - SPANS.seven_day >= midnight ? 0 : null;
+  return from !== null && used >= from ? used - from : null;
 }
 
 // When the 7-day limit runs out at the recent pace, if before the reset: { at, left, gained, over, resetMs }.
@@ -1405,22 +1460,27 @@ function divider(Text, key) {
   return Text({ key, dimColor: true, children: SEP });
 }
 
-function gaugeBlock({ Box, Text, Svg }, mode, g) {
+function gaugeBlock({ Box, Text, Svg }, mode, g, solo = false) {
   // The bar carries the color; the text stays in the theme's color, readable everywhere.
   const color = ICON_COLORS[g.kind] ?? ICON_COLORS.spend_limit;
   const parts = [];
   if (mode === "svg") parts.push(icon(Svg, "k", LIMIT_ICONS[g.kind] ?? "coin", color, T.icons[g.kind] ?? g.label));
   parts.push(Text({ key: "l", children: g.label }));
-  if (mode === "svg" && Svg) parts.push(Svg({ key: "g", source: svgGauge(g), alt: T.gaugeAlt(g.label, g.value), width: GAUGE.width, height: GAUGE.height }));
+  if (mode === "svg" && Svg) parts.push(Svg({ key: "g", source: svgGauge(g, solo ? GAUGE.solo : GAUGE.width), alt: T.gaugeAlt(g.label, g.value), width: solo ? GAUGE.solo : GAUGE.width, height: GAUGE.height }));
   if (mode === "text") parts.push(textGauge(Box, Text, g));
   parts.push(Text(g.tone === "alert" ? { key: "v", bold: true, color: TONES.alert.text, children: g.value } : { key: "v", bold: true, children: g.value }));
   // Terminal too narrow: the detail goes with the bar, leaving the label and the percentage.
   // In the app the run-out warning takes the reset countdown's place: it is the date that
   // matters, and the reset stays in the hover card.
-  if (g.when && mode === "svg" && !g.out) {
+  // Without a 5-hour window (a plan with the weekly limit alone), the week's pill says where
+  // the week ends at this pace; the countdown goes to the hover card.
+  const end = solo && g.end && !g.out ? T.weekEnd(T.percent(g.end.end), T.weekdays[new Date(g.resetMs).getDay()]) : "";
+  if (end && mode === "svg") {
+    parts.push(divider(Text, "s"), icon(Svg, "i", "flag", color, T.icons.weekEnd, SMALL_ICON), Text({ key: "e", dimColor: true, children: end }));
+  } else if (g.when && mode === "svg" && !g.out) {
     parts.push(divider(Text, "s"), icon(Svg, "i", "clock", color, T.icons.reset, SMALL_ICON), Text({ key: "d", dimColor: true, children: g.when }));
   }
-  else if (g.when && mode === "text") parts.push(Text({ key: "d", dimColor: true, children: `· ${g.when}` }));
+  else if (g.when && mode === "text") parts.push(Text({ key: "d", dimColor: true, children: end ? `· ${g.when} ${end}` : `· ${g.when}` }));
   // The 7-day limit running out before the reset: amber, red within a day.
   // Not when the line is too narrow for details: the warning would make it wrap.
   if (g.out && mode !== "none") {
@@ -1433,8 +1493,36 @@ function gaugeBlock({ Box, Text, Svg }, mode, g) {
     ? T.resetsAt(g.resetAt)
     : g.out
       ? [T.runOutTip(T.percent(Math.round(g.out.gained)), duration(g.out.over), dayPartOf(g.out.at), clockTime(g.out.at), dateOf(g.out.resetMs)), recentLine(g.out.recent)].filter(Boolean).join("\n")
-      : "";
+      : end
+        ? T.weekEndTip(T.percent(Math.round(g.used)), duration(g.end.over), T.percent(g.end.end), dateOf(g.resetMs), g.when)
+        : "";
   return { key: "gauge-" + g.label, tint: TINTS[g.kind] ?? TINTS.spend_limit, parts, tip };
+}
+
+// What a day may use of the 7-day limit until its reset: what is left over the days left.
+function dayBudget(g) {
+  return (100 - g.used) / Math.max(g.left / DAY, 1);
+}
+
+// The pill that takes the 5-hour window's place on a plan with the weekly limit alone.
+function dayBlock({ Text, Svg }, mode, g) {
+  const value = T.share(dayBudget(g));
+  const parts = [];
+  if (mode === "svg") {
+    parts.push(icon(Svg, "i", "day", ICON_COLORS.five_hour, T.icons.day), Text({ key: "v", bold: true, children: value }), Text({ key: "d", dimColor: true, children: T.perDay }));
+  } else parts.push(Text({ key: "v", children: T.perDayShort(value) }));
+  const tip = [T.dayTips.budget(T.percent(Math.round(100 - g.used)), g.when, value, dateOf(g.resetMs))];
+  if (g.today !== null) tip.push(T.dayTips.today(T.share(g.today)));
+  return { key: "day", tint: TINTS.five_hour, parts, tip: mode === "svg" ? tip.join("\n") : "" };
+}
+
+// The weekly limit shown without a 5-hour window, with time left: the gauge the day pill reads.
+// A 5-hour window that already reset is hidden but still says the plan has one: read from the
+// account's limits, not from the gauges drawn.
+function soloWeek(gauges) {
+  if (limits.list.some((l) => l.kind === "five_hour")) return null;
+  const g = gauges.find((g) => g.kind === "seven_day");
+  return g && g.left > 0 && g.used < 100 ? g : null;
 }
 
 function cacheBlock({ Text, Svg }, mode, state) {
@@ -1484,8 +1572,8 @@ function textGauge(Box, Text, g) {
 
 // Drawn gauge: solid bar up to the share used; the gap with elapsed time is hatched,
 // grey after the bar (margin left) or in the bar's color (ahead of time).
-function svgGauge(g) {
-  const { width, height } = GAUGE;
+function svgGauge(g, width = GAUGE.width) {
+  const { height } = GAUGE;
   const radius = height / 2;
   const used = (bound(g.used) / 100) * width;
   const time = g.elapsed === null ? used : (g.elapsed / 100) * width;
@@ -1540,7 +1628,11 @@ function drawLine(elements, surface, columns, now) {
     }
     blocks.push({ key: "context", tint: TINTS.context, parts, tip: title });
   }
-  for (const g of gauges) blocks.push(gaugeBlock(elements, mode, g));
+  const solo = soloWeek(gauges);
+  for (const g of gauges) {
+    if (g === solo && mode !== "none") blocks.push(dayBlock(elements, mode, g));
+    blocks.push(gaugeBlock(elements, mode, g, g === solo));
+  }
   if (cacheNow) blocks.push(cacheBlock(elements, mode, cacheNow));
   // The cost goes first when the terminal is short of room.
   if (cost !== null && cost >= 0.005 && mode !== "none") {
@@ -1610,6 +1702,12 @@ function textWidth(gauges, cacheNow) {
   }
   for (const g of gauges) width += g.label.length + 1 + TEXT_CELLS + 1 + g.value.length + (g.when ? 3 + g.when.length : 0) + (g.out ? 3 + T.runOut(dayPartOf(g.out.at)).length : 0);
   blocks += gauges.length;
+  const solo = soloWeek(gauges);
+  if (solo) {
+    width += T.perDayShort(T.share(dayBudget(solo))).length;
+    if (solo.end && !solo.out) width += 1 + T.weekEnd(T.percent(solo.end.end), T.weekdays[new Date(solo.resetMs).getDay()]).length;
+    blocks++;
+  }
   if (cacheNow) {
     width += cacheText(cacheNow).length;
     blocks++;
