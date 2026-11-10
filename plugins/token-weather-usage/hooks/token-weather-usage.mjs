@@ -78,6 +78,8 @@ const TEXT = {
       soon: (time, tokens, costs) =>
         `The cache expires at ${time}. Send your next message before then, or it writes ${tokens} tokens again${costs ? ` (${costs.rewrite} instead of ${costs.read})` : ""}.`,
       expired: (tokens, cost) => `The next message writes the whole context (${tokens}) again at full price${cost ? `, ${cost}` : ""}.`,
+      moved: (from, to, tokens, cost, until) =>
+        `Model changed (${from} → ${to}): the cache does not follow. The next message writes the whole context (${tokens}) again at ${to}'s price${cost ? `, ${cost}` : ""}. Back on ${from} before ${until}, its cache still serves.`,
       compact: "/compact before going on: the context written again will be smaller.",
       newThread: "A new thread avoids this rewrite; a compaction would read it all again.",
       missed: (share, cause, tokens, surcharge) =>
@@ -170,6 +172,8 @@ const TEXT = {
       soon: (time, tokens, costs) =>
         `Le cache expire à ${time}. Envoie ton prochain message avant, sinon il réécrira ${tokens} tokens${costs ? ` (${costs.rewrite} au lieu de ${costs.read})` : ""}.`,
       expired: (tokens, cost) => `Le prochain message réécrira tout le contexte (${tokens}) au prix fort${cost ? `, ${cost}` : ""}.`,
+      moved: (from, to, tokens, cost, until) =>
+        `Modèle changé (${from} → ${to}) : le cache ne suit pas. Le prochain message réécrira tout le contexte (${tokens}) au prix de ${to}${cost ? `, ${cost}` : ""}. En revenant à ${from} avant ${until}, son cache sert encore.`,
       compact: "/compact avant de reprendre : le contexte réécrit sera plus petit.",
       newThread: "Un nouveau fil évite cette réécriture ; une compaction relirait tout.",
       missed: (share, cause, tokens, surcharge) =>
@@ -260,6 +264,8 @@ const TEXT = {
       soon: (time, tokens, costs) =>
         `Кэш истекает в ${time}. Отправь следующее сообщение до этого, иначе ${tokens} токенов запишутся заново${costs ? ` (${costs.rewrite} вместо ${costs.read})` : ""}.`,
       expired: (tokens, cost) => `Следующее сообщение заново запишет весь контекст (${tokens}) по полной цене${cost ? `, ${cost}` : ""}.`,
+      moved: (from, to, tokens, cost, until) =>
+        `Модель сменилась (${from} → ${to}): кэш не переносится. Следующее сообщение заново запишет весь контекст (${tokens}) по цене ${to}${cost ? `, ${cost}` : ""}. Если вернуться к ${from} до ${until}, её кэш ещё сработает.`,
       compact: "Сделай /compact перед продолжением: перезаписываемый контекст будет меньше.",
       newThread: "Новый тред избавит от перезаписи; сжатие прочитает всё заново.",
       missed: (share, cause, tokens, surcharge) =>
@@ -446,8 +452,12 @@ const MISS_SHARE = 50;
 const MISS_WRITE = 1_000;
 // From this share read from the cache, the pill shows the time left alone.
 const GOOD_HIT = 90;
-// Last main-loop request: { at, model, read, write, fresh, cause }.
+// Last main-loop request: { at, model, read, write, fresh, cause, main }; main is the session's
+// model when it was made.
 let cache = null;
+// The session's model as /model shows it, read at each drawing: a cache belongs to its model,
+// so a switch since the last request means the next one writes the whole context again.
+let mainNow = "";
 // True from a compaction of the main conversation until its next request: the cache that
 // request writes is a new one, neither expired nor missed.
 let compacted = false;
@@ -597,6 +607,7 @@ export function register(on, options) {
     readings = [];
     limits = { at: 0, list: [] };
     cache = null;
+    mainNow = "";
     compacted = false;
     seenTtl = null;
     savedUsd = 0;
@@ -698,6 +709,8 @@ export function register(on, options) {
     const result = yield* next(e);
     if (result?.usage) {
       recordRequest(at, result.usage, e.model);
+      mainNow = await sessionModel($);
+      if (cache && mainNow) cache.main = mainNow;
       // The request may have started an agent.
       await refreshAgents($);
       $.ui.invalidate("ui.render");
@@ -780,6 +793,7 @@ export function register(on, options) {
     if (props.hasSurvey || (readings.length === 0 && limits.list.length === 0)) return next(e);
     const elements = $.ui.resolve(e);
     const now = await $.clock.now();
+    mainNow = await sessionModel($);
     const line = drawLine(elements, e.surface, props.bodyColumns ?? 80, now);
     // Mods placed after us draw below our line; an empty drawing adds no blank line.
     const below = await next(e);
@@ -1104,6 +1118,23 @@ function priceOf(model, tokens = 0) {
   return price.over && tokens > price.over.at ? price.over : price;
 }
 
+// The session's model; "" when the engine does not say.
+async function sessionModel($) {
+  try {
+    const model = await $.session.model();
+    return typeof model === "string" ? model : "";
+  } catch {
+    return "";
+  }
+}
+
+// The session's model when it is no longer the one the last request ran on, else null. Both
+// readings come from the engine the same way, so only a real switch tells them apart.
+function movedModel() {
+  if (!cache?.main || !mainNow) return null;
+  return modelId(mainNow) !== modelId(cache.main) ? mainNow : null;
+}
+
 // Price of a cache write, per million tokens, for the lifetime in use.
 function writePrice(price, ttl) {
   return (ttl === TTL["1h"] ? 2 : 1.25) * price.input;
@@ -1132,7 +1163,9 @@ function cacheState(now) {
   const ttl = ttlMs();
   // In dollars, at list prices, for the context the next message reads: from the cache, and
   // written again once it lapsed. Null for a model missing from PRICES: tokens only.
-  const price = priceOf(cache.model, tokens);
+  // After a model switch the next message runs on the new model: its price, and no cache to read.
+  const moved = movedModel();
+  const price = priceOf(moved ?? cache.model, tokens);
   const costs = price ? { read: (tokens * price.read) / 1e6, rewrite: (tokens * writePrice(price, ttl)) / 1e6 } : null;
   // Expired: say what the next message writes again, and the way out: from 300k a new thread
   // (it avoids rewriting the whole context at full price), from 100k /compact. In the app the
@@ -1145,6 +1178,17 @@ function cacheState(now) {
     if (tokens >= LARGE_CONTEXT) tip.push(T.tips.newThread);
     else if (tokens >= COMPACT_AT) tip.push(T.tips.compact);
     return { tone: "alert", value: T.expired, detail, advice, tip: tip.join("\n") };
+  }
+  // Model switched while the cache is warm: the same rewrite as an expired cache, at the new
+  // model's price, in amber since going back to the model before finds its cache again.
+  if (moved) {
+    const rewrite = T.toRewrite(short(tokens));
+    const detail = tokens < COMPACT_AT ? "" : costs ? `${rewrite} ${approx(costs.rewrite)}` : rewrite;
+    const advice = tokens >= LARGE_CONTEXT ? T.newThread : tokens >= COMPACT_AT ? "/compact" : "";
+    const tip = [T.tips.moved(modelName(cache.main), modelName(moved), short(tokens), costs && approx(costs.rewrite), clockTime(cache.at + ttl))];
+    if (tokens >= LARGE_CONTEXT) tip.push(T.tips.newThread);
+    else if (tokens >= COMPACT_AT) tip.push(T.tips.compact);
+    return { tone: "fast", value: T.causes.model, detail, advice, tip: tip.join("\n") };
   }
   const share = hitOf(cache);
   // A miss: what writing the cache again cost above a message served by it.

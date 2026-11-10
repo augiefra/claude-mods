@@ -10,7 +10,7 @@ Stop hitting your Claude limit by surprise. One band above the prompt shows how 
 
 ![One session, step by step](docs/band-story.gif)
 
-### Four situations
+### Five situations
 
 **All clear.** Small context, both limits behind the clock, the cache warm for almost an hour.
 
@@ -27,6 +27,10 @@ Stop hitting your Claude limit by surprise. One band above the prompt shows how 
 **Slow down.** Context near full, the 5-hour limit far ahead of time, the cache expired: `/compact` before going on.
 
 ![Slow down](docs/situations/alert.png)
+
+**Weekly limit alone.** On a plan without a 5-hour window, the band says what a day may use and where the week ends at its pace.
+
+![Weekly limit alone](docs/situations/week-alone.png)
 
 ### What each pill says
 
@@ -69,7 +73,9 @@ In the app, **hover any pill** for its details.
 
 #### Weekly limit alone
 
-On a plan without a 5-hour window, the band uses the room for the week:
+On a plan without a 5-hour window, the band uses the room for the week. The mod tells the plan by the limits the account reports: with a 5-hour limit the band stays as above.
+
+![The day pill's hover card: what is left, until when, what today used](docs/situations/week-alone-day.png)
 
 - **A day pill** takes the 5-hour pill's place: what is left of the 7-day limit over the days left ("15% a day"). Hover: what is left, until when, and what today used so far ("Today so far: +6%").
 - **The 7d pill says where the week ends** at its pace so far ("→ 64% Mon") in place of the time left, which moves to the hover card. From the week's second day; when the pace would run out before the reset, the run-out warning below shows instead.
@@ -99,6 +105,9 @@ On a plan without a 5-hour window, the band uses the room for the week:
 - **Under 10 minutes** (yellow): what is at stake ("$2.32 at stake"), the whole context written again if it lapses.
 - **Expired** (red): what the next message writes again and its cost ("741k to rewrite ≈ $5.93").
 - **Missed**: a message had to write the cache again; shows the cause (model changed, lapsed, start changed) and the extra cost ("+$2.10").
+- **Model changed** (amber): after `/model`, a cache does not follow to another model. The pill says so before you send, with what the next message writes again at the new model's price ("412k to rewrite ≈ $6.59"). Hover: going back to the model before, while its cache is warm, finds it again.
+
+![After /model: the cache does not follow, the rewrite at the new model's price](docs/situations/model-switch.png)
 - **The way out**, from 100k tokens: `/compact` up to 300k, a new thread beyond.
 
 <details>
@@ -196,7 +205,7 @@ claude plugin test ./plugins/token-weather-usage
 
 ## Privacy
 
-token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits, session cost, each request's cache token counts), the list of the session's subagents and the names of the tools their responses ask for (never the arguments; shown in the agents card, kept in memory only and never stored), the text of Claude's final answer in the main thread, to find the quoted GO approvals (kept in memory only, until your next message), the locale variables above and the prompt-cache switches (`DISABLE_PROMPT_CACHING`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`). It reads no file and hooks no tool call. It sends a message only when you click the GO pill's OK, and that message is only the approvals it showed you. It keeps in the plugin's local storage, on the machine, the latest limits reading, the 7-day share used every half hour over the last two days, and, per session, recent context readings, the last request's cache figures, what the cache saved in the session, the last prompt's cost and each subagent's model, effort, token counts and description (deleted after 8 idle days). No network requests.
+token-weather-usage collects, sends and retains no personal data. It only reads the usage figures Claude Code provides (context fill, 5-hour and 7-day limits, session cost, the session's model, each request's cache token counts), the list of the session's subagents and the names of the tools their responses ask for (never the arguments; shown in the agents card, kept in memory only and never stored), the text of Claude's final answer in the main thread, to find the quoted GO approvals (kept in memory only, until your next message), the locale variables above and the prompt-cache switches (`DISABLE_PROMPT_CACHING`, `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`). It reads no file and hooks no tool call. It sends a message only when you click the GO pill's OK, and that message is only the approvals it showed you. It keeps in the plugin's local storage, on the machine, the latest limits reading, the 7-day share used every half hour over the last two days, and, per session, recent context readings, the last request's cache figures, what the cache saved in the session, the last prompt's cost and each subagent's model, effort, token counts and description (deleted after 8 idle days). No network requests.
 
 **What its hooks do.** Every hook only reads and passes the event on unchanged (`return next(e)`): the mod never changes, delays or refuses anything; the one message it can send is the GO pill's, on your click. `session.start` and `session.end` start and stop its timers; `turn.step` reads each model response's token counts and the names of the tools it asks for; `turn.complete` reads the session's usage after each turn and the main thread's final answer for its GO approvals; `session.measure` reads new limits and cost readings; `session.compact` notes a compaction; `ui.render` draws the band above the prompt, with the GO pill at its end.
 

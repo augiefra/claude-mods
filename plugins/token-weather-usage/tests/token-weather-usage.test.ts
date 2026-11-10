@@ -750,6 +750,63 @@ test("desktop: pills never shrink, and the 5-hour reset time sits in the pill's 
 
 // ---------- Compaction ----------
 
+test("cache: after a model switch, the whole context at the new model's price", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, {});
+  let model = "claude-opus-5-5[1m]";
+  on("session.model", () => ({ value: model }));
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  withUsage(on, LIMITS, { tokens: 741_000, window: 1_000_000, percent: 74 });
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await (clock as any).advance(5 * 60_000);
+  // Same model: the cache is warm, nothing to say.
+  expect((await band($, "terminal")).texts.join(" ")).not.toContain("model changed");
+  // /model to Fable 5.2 ($8 a million in, a 1-hour write at 2x): 741k written again.
+  model = "claude-fable-5-2[1m]";
+  const fable = en$((741_000 * 16) / 1e6);
+  const { texts } = await band($, "terminal");
+  expect(texts).toContain("model changed");
+  expect(texts).toContain(`· 741k to rewrite ≈ ${fable} · new thread`);
+  const desktop = await band($, "desktop");
+  const pill: any = await desktop.ui.find({ type: "Text", text: "model changed" });
+  expect(pill?.props?.color).toBe("#a8690a");
+  const tip = String(await boltTip(desktop.ui));
+  expect(tip).toContain(`Model changed (Opus 5.5 → Fable 5.2): the cache does not follow. The next message writes the whole context (741k) again at Fable 5.2's price, ≈ ${fable}.`);
+  expect(tip).toContain("Back on Opus 5.5 before ");
+  // Once the cache lapsed the pill says expired, still at the new model's price.
+  await (clock as any).advance(61 * 60_000);
+  expect((await band($, "terminal")).texts).toContain(`· 741k to rewrite ≈ ${fable} · new thread`);
+  expect((await band($, "terminal")).texts).toContain("expired");
+  // Back on the model before, the price is its own again.
+  model = "claude-opus-5-5";
+  expect((await band($, "terminal")).texts).toContain(`· 741k to rewrite ≈ ${en$(rewriteCost(741_000))} · new thread`);
+});
+
+test("cache: a model the engine does not name changes nothing", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, {});
+  on("session.model", () => {
+    throw new Error("no model");
+  });
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  withUsage(on, LIMITS, { tokens: 741_000, window: 1_000_000, percent: 74 });
+  engineStep(on, [HIT]);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  await step($, HIT);
+  await (clock as any).advance(5 * 60_000);
+  expect((await band($, "terminal")).texts.join(" ")).not.toContain("model changed");
+});
+
 // A large thread whose cache expired, as the band showed it before a /compact.
 async function largeExpired($: any, on: any, compaction: Record<string, unknown>) {
   const clock = mock.clock(on, { now: NOW });
