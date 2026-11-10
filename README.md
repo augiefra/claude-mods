@@ -6,7 +6,7 @@
 
 [![Listed on statuslin.es](https://img.shields.io/badge/listed%20on-statuslin.es-c96442)](https://statuslin.es/mods/token-weather-usage)
 
-Stop hitting your Claude limit by surprise. One band above the prompt shows how big your context is, your 5-hour and weekly limits against the clock (with a warning when the week's pace would run out before the reset), whether the prompt cache is still warm, what the session and the last prompt cost, which agents are running, and, when Claude asks for your go-ahead, one click to give it.
+Stop hitting your Claude limit by surprise. One band above the prompt shows how big your context is, your 5-hour and weekly limits against the clock (with a warning when the week's pace would run out before the reset), whether the prompt cache is still warm (and when a `/model` switch is about to rewrite it), what the session and the last prompt cost, which agents are running, and, when Claude asks for your go-ahead, one click to give it.
 
 ![One session, step by step](docs/band-story.gif)
 
@@ -31,6 +31,18 @@ Stop hitting your Claude limit by surprise. One band above the prompt shows how 
 **Weekly limit alone.** On a plan without a 5-hour window, the band says what a day may use and where the week ends at its pace.
 
 ![Weekly limit alone](docs/situations/week-alone.png)
+
+### Switching models mid-thread
+
+A prompt cache belongs to one model. Switch with `/model` in the middle of a long thread, and the next message reads nothing from the cache: it writes the whole context again, at the new model's price. On a 400k context that is several dollars for one message.
+
+The cache pill says so as soon as you switch, before you send anything:
+
+![Switching models: the cache pill before, right after /model, and back on the first model](docs/situations/model-switch-story.png)
+
+- **Amber "model changed"**, with what the next message would write again and its cost at the new model's price.
+- **Hover** for the way back: return to the model before while its cache is warm, and it serves again. Going on with the new model pays the rewrite once; the pill then counts down the new cache.
+- **The cheap moment to switch** is a cut: a new thread, or right after `/compact`, when the context is small.
 
 ### What each pill says
 
@@ -105,9 +117,10 @@ On a plan without a 5-hour window, the band uses the room for the week. The mod 
 - **Under 10 minutes** (yellow): what is at stake ("$2.32 at stake"), the whole context written again if it lapses.
 - **Expired** (red): what the next message writes again and its cost ("741k to rewrite ≈ $5.93").
 - **Missed**: a message had to write the cache again; shows the cause (model changed, lapsed, start changed) and the extra cost ("+$2.10").
-- **Model changed** (amber): after `/model`, a cache does not follow to another model. The pill says so before you send, with what the next message writes again at the new model's price ("412k to rewrite ≈ $6.59"). Hover: going back to the model before, while its cache is warm, finds it again.
+- **Model changed** (amber): after `/model`, a cache does not follow to another model. The pill says so before you send, with what the next message writes again at the new model's price ("412k to rewrite ≈ $6.59"). See [Switching models mid-thread](#switching-models-mid-thread).
 
 ![After /model: the cache does not follow, the rewrite at the new model's price](docs/situations/model-switch.png)
+
 - **The way out**, from 100k tokens: `/compact` up to 300k, a new thread beyond.
 
 <details>

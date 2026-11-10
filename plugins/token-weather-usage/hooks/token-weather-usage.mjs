@@ -21,6 +21,9 @@
 // Labels in English, French or Russian. "auto" follows LC_ALL, LC_MESSAGES or LANG, then the runtime's
 // locale; English unless one of them starts with "fr" or "ru". The desktop app often sets none of
 // them, so the language option (/config) is the sure way to pick.
+// French "de" before a name: "d'Opus", "de Fable" (h aspirated, as in "de Haiku").
+const deFr = (name) => (/^[aeiouyàâéèêëîïôöùûü]/i.test(String(name)) ? `d'${name}` : `de ${name}`);
+
 const TEXT = {
   en: {
     weather: { clear: "Clear", cloudy: "Cloudy", showers: "Showers", storm: "Storm", compact: "Compact soon" },
@@ -173,7 +176,7 @@ const TEXT = {
         `Le cache expire à ${time}. Envoie ton prochain message avant, sinon il réécrira ${tokens} tokens${costs ? ` (${costs.rewrite} au lieu de ${costs.read})` : ""}.`,
       expired: (tokens, cost) => `Le prochain message réécrira tout le contexte (${tokens}) au prix fort${cost ? `, ${cost}` : ""}.`,
       moved: (from, to, tokens, cost, until) =>
-        `Modèle changé (${from} → ${to}) : le cache ne suit pas. Le prochain message réécrira tout le contexte (${tokens}) au prix de ${to}${cost ? `, ${cost}` : ""}. En revenant à ${from} avant ${until}, son cache sert encore.`,
+        `Modèle changé (${from} → ${to}) : le cache ne suit pas. Le prochain message réécrira tout le contexte (${tokens}) au prix ${deFr(to)}${cost ? `, ${cost}` : ""}. En revenant à ${from} avant ${until}, son cache sert encore.`,
       compact: "/compact avant de reprendre : le contexte réécrit sera plus petit.",
       newThread: "Un nouveau fil évite cette réécriture ; une compaction relirait tout.",
       missed: (share, cause, tokens, surcharge) =>

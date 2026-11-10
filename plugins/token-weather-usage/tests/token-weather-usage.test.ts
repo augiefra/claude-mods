@@ -788,6 +788,30 @@ test("cache: after a model switch, the whole context at the new model's price", 
   expect((await band($, "terminal")).texts).toContain(`· 741k to rewrite ≈ ${en$(rewriteCost(741_000))} · new thread`);
 });
 
+test("cache: after a model switch, French: \"d'Opus\", \"de Fable\"", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW });
+  mock.store(on, {});
+  mock.env(on, { LANG: "fr_FR.UTF-8" });
+  let model = "claude-fable-5-2";
+  on("session.model", () => ({ value: model }));
+  on("session.id", () => ({ value: "session-1" }));
+  on("session.start", (_$: any, e: any) => ({ cwd: e.cwd ?? "/tmp" }));
+  on("ui.invalidate", () => ({ value: undefined }));
+  on("ui.render", ($: any, e: any) => $.ui.resolve(e).Box({ children: [] }));
+  withUsage(on, LIMITS, { tokens: 254_000, window: 1_000_000, percent: 25 });
+  engineStep(on, [{ ...HIT, model: "claude-fable-5-2" }]);
+  await $.session.start({ source: "resume", cwd: "/tmp" } as any);
+  await step($, { ...HIT, model: "claude-fable-5-2" }, "claude-fable-5-2");
+  await (clock as any).advance(5 * 60_000);
+  model = "claude-opus-5-5";
+  let tip = String(await boltTip((await band($, "desktop")).ui));
+  expect(tip).toContain("au prix d'Opus 5.5");
+  expect(tip).toContain("En revenant à Fable 5.2 avant ");
+  model = "claude-sonnet-5-5";
+  tip = String(await boltTip((await band($, "desktop")).ui));
+  expect(tip).toContain("au prix de Sonnet 5.5");
+});
+
 test("cache: a model the engine does not name changes nothing", async ($, on) => {
   const clock = mock.clock(on, { now: NOW });
   mock.store(on, {});
