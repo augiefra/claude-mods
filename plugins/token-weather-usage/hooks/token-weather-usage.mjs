@@ -62,6 +62,7 @@ const TEXT = {
     weekEnd: (pct, day) => `→ ${pct} ${day}`,
     weekEndTip: (gained, over, pct, reset, left) => `At this week's pace (+${gained} in ${over}), the week ends around ${pct}.\nResets ${reset}, in ${left}.`,
     perDay: "a day",
+    workWeek: "Weekly pace counted on workdays only (Mon–Fri).",
     perDayShort: (pct) => `${pct}/day`,
     dayTips: {
       budget: (left, time, pct, reset) => `${left} left for ${time}: ${pct} a day until the reset on ${reset}.`,
@@ -158,6 +159,7 @@ const TEXT = {
     weekEnd: (pct, day) => `→ ${pct} ${day}`,
     weekEndTip: (gained, over, pct, reset, left) => `Au rythme de la semaine (+${gained} en ${over}), la semaine finirait vers ${pct}.\nRemise à zéro ${reset}, dans ${left}.`,
     perDay: "par jour",
+    workWeek: "Rythme de la semaine compté sur les jours ouvrés (lun.–ven.).",
     perDayShort: (pct) => `${pct}/jour`,
     dayTips: {
       budget: (left, time, pct, reset) => `${left} restants pour ${time} : ${pct} par jour jusqu'à la remise à zéro du ${reset}.`,
@@ -250,6 +252,7 @@ const TEXT = {
     weekEnd: (pct, day) => `→ ${pct} ${day}`,
     weekEndTip: (gained, over, pct, reset, left) => `При темпе этой недели (+${gained} за ${over}) неделя закончится примерно на ${pct}.\nСброс ${reset}, через ${left}.`,
     perDay: "в день",
+    workWeek: "Недельный темп считается только по будням (пн–пт).",
     perDayShort: (pct) => `${pct}/день`,
     dayTips: {
       budget: (left, time, pct, reset) => `Осталось ${left} на ${time}: ${pct} в день до сброса ${reset}.`,
@@ -435,6 +438,41 @@ const OUT_MIN_USED = 15;
 const OUT_ALERT = DAY;
 let week = [];
 let ticker = null;
+// The workWeek option: the 7-day pace counts Monday to Friday only (the machine's time zone),
+// for those who leave Claude Code alone at the weekend (#11).
+let workWeek = false;
+
+function isWorkDay(ms) {
+  const day = new Date(ms).getDay();
+  return day >= 1 && day <= 5;
+}
+
+// The time between a and b that counts toward the week's pace: all of it, or its workdays.
+function counted(a, b) {
+  if (!workWeek) return Math.max(0, b - a);
+  let total = 0;
+  for (let t = a; t < b; ) {
+    const next = Math.min(b, new Date(t).setHours(24, 0, 0, 0));
+    if (isWorkDay(t)) total += next - t;
+    t = next;
+  }
+  return total;
+}
+
+// The instant when `amount` of counted time has passed after `from`; null if not before `limit`.
+function countedAfter(from, amount, limit) {
+  if (!workWeek) return from + amount < limit ? from + amount : null;
+  let rest = amount;
+  for (let t = from; t < limit; ) {
+    const next = Math.min(limit, new Date(t).setHours(24, 0, 0, 0));
+    if (isWorkDay(t)) {
+      if (next - t > rest) return t + rest;
+      rest -= next - t;
+    }
+    t = next;
+  }
+  return null;
+}
 
 // ---------- Prompt cache ----------
 
@@ -602,6 +640,7 @@ const RESERVED_COLUMNS = 2;
 export function register(on, options) {
   const language = options?.language;
   goOn = options?.goPill !== false && String(options?.goPill).toLowerCase() !== "false";
+  workWeek = options?.workWeek === true || String(options?.workWeek).toLowerCase() === "true";
 
   on("session.start", async ($, e, next) => {
     ticker?.cancel();
@@ -922,7 +961,9 @@ function gaugeOf(limit, now) {
   const resetMs = limit.resetsAt ? Date.parse(limit.resetsAt) : NaN;
   const span = SPANS[limit.kind];
   const left = Number.isFinite(resetMs) ? Math.max(0, resetMs - now) : null;
-  const elapsed = span && left !== null ? bound(((span - left) / span) * 100) : null;
+  // The 7-day window against its counted time: all of it, or its workdays with workWeek.
+  const whole = limit.kind === "seven_day" && left !== null ? counted(resetMs - span, resetMs) : 0;
+  const elapsed = span && left !== null ? bound(whole > 0 ? (counted(resetMs - span, now) / whole) * 100 : ((span - left) / span) * 100) : null;
   const pace = elapsed === null ? 0 : used - elapsed;
   const tone = used >= USED_ALERT || pace > PACE_ALERT ? "alert" : pace > 0 ? "fast" : "calm";
   // The time left; the 5-hour reset time goes to the clock's tooltip.
@@ -938,9 +979,10 @@ function weekEndOf(limit, used, now) {
   const resetMs = Date.parse(limit.resetsAt ?? "");
   if (!Number.isFinite(resetMs)) return null;
   const start = resetMs - SPANS.seven_day;
-  if (now - start < OUT_MIN_ELAPSED || now >= resetMs) return null;
-  const end = Math.round((used * SPANS.seven_day) / (now - start));
-  return end < 100 ? { end, over: now - start } : null;
+  const over = counted(start, now);
+  if (over < OUT_MIN_ELAPSED || now >= resetMs) return null;
+  const end = Math.round((used * counted(start, resetMs)) / over);
+  return end < 100 ? { end, over } : null;
 }
 
 // The points of the 7-day limit used since midnight, from the readings kept; null unknown.
@@ -960,13 +1002,14 @@ function runOutOf(limit, used, now) {
   const resetMs = Date.parse(limit.resetsAt ?? "");
   if (!Number.isFinite(resetMs)) return null;
   const start = resetMs - SPANS.seven_day;
-  if (now - start < OUT_MIN_ELAPSED || used < OUT_MIN_USED || used >= 100) return null;
-  // The week's pace decides, as Claude's own usage page does.
-  const rate = used / (now - start);
+  const over = counted(start, now);
+  if (over < OUT_MIN_ELAPSED || used < OUT_MIN_USED || used >= 100) return null;
+  // The week's pace decides, as Claude's own usage page does; with workWeek, over workdays.
+  const rate = used / over;
   if (!(rate > 0)) return null;
-  const at = now + (100 - used) / rate;
-  if (at >= resetMs) return null;
-  return { at, left: at - now, gained: used, over: now - start, resetMs, recent: recentPace(limit, used, now, resetMs) };
+  const at = countedAfter(now, (100 - used) / rate, resetMs);
+  if (at === null) return null;
+  return { at, left: at - now, gained: used, over, resetMs, recent: recentPace(limit, used, now, resetMs) };
 }
 
 // The pace since the reading closest to a day ago (at least six hours old), shown beside the week's.
@@ -977,8 +1020,10 @@ function recentPace(limit, used, now, resetMs) {
     if (!base || Math.abs(now - s.at - PACE_SPAN) < Math.abs(now - base.at - PACE_SPAN)) base = s;
   }
   if (!base || !(used > base.used)) return null;
-  const at = now + (100 - used) * (now - base.at) / (used - base.used);
-  return { at: at < resetMs ? at : null, gained: used - base.used, over: now - base.at };
+  const over = counted(base.at, now);
+  if (!(over > 0)) return null;
+  const at = countedAfter(now, (100 - used) * over / (used - base.used), resetMs);
+  return { at, gained: used - base.used, over };
 }
 
 // "Fri evening": the hours after midnight belong to the day before ("Fri night").
@@ -1543,12 +1588,13 @@ function gaugeBlock({ Box, Text, Svg }, mode, g, solo = false) {
       : end
         ? T.weekEndTip(T.percent(Math.round(g.used)), duration(g.end.over), T.percent(g.end.end), dateOf(g.resetMs), g.when)
         : "";
-  return { key: "gauge-" + g.label, tint: TINTS[g.kind] ?? TINTS.spend_limit, parts, tip };
+  const note = workWeek && g.kind === "seven_day" ? T.workWeek : "";
+  return { key: "gauge-" + g.label, tint: TINTS[g.kind] ?? TINTS.spend_limit, parts, tip: [tip, note].filter(Boolean).join("\n") };
 }
 
 // What a day may use of the 7-day limit until its reset: what is left over the days left.
 function dayBudget(g) {
-  return (100 - g.used) / Math.max(g.left / DAY, 1);
+  return (100 - g.used) / Math.max(counted(g.resetMs - g.left, g.resetMs) / DAY, 1);
 }
 
 // The pill that takes the 5-hour window's place on a plan with the weekly limit alone.
@@ -1560,6 +1606,7 @@ function dayBlock({ Text, Svg }, mode, g) {
   } else parts.push(Text({ key: "v", children: T.perDayShort(value) }));
   const tip = [T.dayTips.budget(T.percent(Math.round(100 - g.used)), g.when, value, dateOf(g.resetMs))];
   if (g.today !== null) tip.push(T.dayTips.today(T.share(g.today)));
+  if (workWeek) tip.push(T.workWeek);
   return { key: "day", tint: TINTS.five_hour, parts, tip: mode === "svg" ? tip.join("\n") : "" };
 }
 

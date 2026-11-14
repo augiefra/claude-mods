@@ -1,6 +1,6 @@
 {
   "name": "token-weather-usage",
-  "version": "3.19.4",
+  "version": "3.20.0",
   "description": "One line above the prompt: context tokens with their weather, a bar per recent prompt, your 5-hour and 7-day limits against the time elapsed, the prompt cache with its time left, the session cost with the last prompt's share in dollars and in points of the 5-hour limit, the subagents running, and a one-click pill for the GOs Claude proposes. Labels in English, French or Russian. After Token Weather (Anthropic, Apache-2.0) and the ideas of usage-meter (HolyGrail) and prompt-cache-control (Daniel San).",
   "author": {
     "name": "Eric Cologni"
@@ -30,6 +30,12 @@
       "title": "GO pill",
       "description": "Shows a pill at the end of the band when Claude's last answer proposes quoted approvals that start with GO (« GO push », “GO deploy”, \"GO merge\", `GO commit`); its OK sends them all back as your message. Off: no pill.",
       "default": true
+    },
+    "workWeek": {
+      "type": "boolean",
+      "title": "Weekly pace on workdays",
+      "description": "Counts Monday to Friday only (the machine's time zone) when the 7-day limit is compared with the time elapsed: the bar's pace, where the week ends, the run-out warning and what a day may use. For those who leave Claude Code alone at the weekend. Off: the full week.",
+      "default": false
     }
   }
 }

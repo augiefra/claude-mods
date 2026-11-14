@@ -34,6 +34,8 @@ In the terminal:
 ☂ 634k ▃▄▂█▆ ▲ +6.3k │ 5h ━━━━╍─ 74% · 24 min │ 7d ━━━━── 65% · 2d20h │ cache 52 min │ ≈ $41.07 (+$0.58 · +1.5% 5h) │ 2 agents
 ```
 
+Weekly pace on workdays: turn on the **Weekly pace on workdays** option (`/config`) to count Monday to Friday only when the 7-day limit is compared with the time elapsed (the bar's pace, where the week ends, the run-out warning, the day budget). Off by default.
+
 Labels in English, French or Russian: `auto` follows `LC_ALL`, `LC_MESSAGES` or `LANG`, otherwise pick `en`, `fr` or `ru` in the **Language** option (`/config`).
 
 ## Privacy

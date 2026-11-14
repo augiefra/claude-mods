@@ -393,6 +393,45 @@ test("a 5-hour window that already reset: hidden, and the week stays as on a 5-h
   expect(texts.some((t) => t.startsWith("→"))).toBe(false);
 });
 
+// workWeek (#11): the 7-day pace counts Monday to Friday only. NOW is a Friday, 13:00 UTC: the
+// week of LIMITS (reset Monday 13:00) has 4 workdays gone and 5 in all, whatever the time zone
+// between UTC-12 and UTC+10.
+test("workWeek: the week's pace over workdays, no run-out warning", { options: { workWeek: true } }, async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  // 59% used with 80% of the workdays gone: behind time, green; the full week (57%) said ahead.
+  const bars = ((await ui.findAll({ type: "Svg" })) as any[]).filter((x) => x.props?.height === 9);
+  const week = bars.find((x) => String(x.props?.alt).startsWith("7d"));
+  expect(String(week?.props?.source)).toContain("#3fa66b");
+  // 41% left needs 2.8 workdays at this pace: the weekend and Monday morning come first.
+  expect(texts.some((t) => t.startsWith("⚠"))).toBe(false);
+  expect(texts).toContain("3d00h");
+  expect(await cardOf(ui, "gauge-7d")).toContain("Weekly pace counted on workdays only (Mon–Fri).");
+});
+
+test("workWeek off: the full week, as before", async ($, on) => {
+  world(on);
+  withUsage(on, LIMITS);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  expect(texts.some((t) => /^⚠ \S/.test(t))).toBe(true);
+  expect(String(await cardOf(ui, "gauge-7d"))).not.toContain("workdays");
+});
+
+test("workWeek, weekly limit alone: a workday's budget and the week's end", { options: { workWeek: true } }, async ($, on) => {
+  world(on);
+  withUsage(on, WEEK_ALONE);
+  await $.session.start({ source: "startup", cwd: "/tmp" } as any);
+  const { ui, texts } = await band($, "desktop");
+  // 74% left over 3 workdays (Friday afternoon, Monday, Tuesday, Wednesday morning).
+  expect(texts).toContain("25%");
+  // 26% in 2 workdays, 5 in the window: the week ends around 65%.
+  expect(texts).toContain(`→ 65% ${resetDay(NOW + 5 * 86_400_000)}`);
+  expect(await cardOf(ui, "day")).toContain("Weekly pace counted on workdays only (Mon–Fri).");
+});
+
 // ---------- Prompt cache and cost ----------
 
 // One main-loop request answered with this usage.

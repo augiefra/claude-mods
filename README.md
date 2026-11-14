@@ -101,6 +101,10 @@ On a plan without a 5-hour window, the band uses the room for the week. The mod 
 - Hover: the exact time and the last day's pace, to tell whether you are speeding up or slowing down.
   > At this week's pace (+62% in 3d23h), the 7-day limit runs out Sun night around 00:42, before the reset on Mon 19/10.
 
+#### Workdays only
+
+If you leave Claude Code alone at the weekend, the full 7-day clock makes your weekdays look too fast. Turn on the **Weekly pace on workdays** option (`/config`): the mod then counts Monday to Friday only (your machine's time zone) for the 7d bar's pace, where the week ends, the run-out warning and the day budget. The weekend no longer counts as time you could have used, and a run-out falls on the next workdays. Off by default.
+
 <details>
 <summary>More detail</summary>
 
